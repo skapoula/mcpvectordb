@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # Must match EMBEDDING_MODEL output size; changing requires full re-index
     embedding_dimension: int = 768
 
+    # Search
+    hybrid_search_enabled: bool = True  # BM25 + vector; disable for pure vector mode
+
     # Chunking
     chunk_size_tokens: int = 512
     chunk_overlap_tokens: int = 64

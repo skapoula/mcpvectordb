@@ -81,7 +81,13 @@ class TestStoreSearch:
     def test_search_empty_table_returns_empty(self, store):
         """Searching an empty table returns [] without raising."""
         embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
-        result = store.search(embedding=embedding, top_k=5, library=None, filter=None)
+        result = store.search(
+            embedding=embedding,
+            query_text="test query",
+            top_k=5,
+            library=None,
+            filter=None,
+        )
         assert result == []
 
     @pytest.mark.integration
@@ -92,7 +98,13 @@ class TestStoreSearch:
         store.upsert_chunks(chunks)
 
         embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
-        result = store.search(embedding=embedding, top_k=3, library=None, filter=None)
+        result = store.search(
+            embedding=embedding,
+            query_text="test query",
+            top_k=3,
+            library=None,
+            filter=None,
+        )
         assert len(result) <= 3
 
     @pytest.mark.integration
@@ -110,7 +122,11 @@ class TestStoreSearch:
 
         embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
         result = store.search(
-            embedding=embedding, top_k=10, library="lib_a", filter=None
+            embedding=embedding,
+            query_text="test query",
+            top_k=10,
+            library="lib_a",
+            filter=None,
         )
         assert all(r.library == "lib_a" for r in result)
 
@@ -428,6 +444,7 @@ class TestStoreErrors:
         with pytest.raises(StoreError):
             store.search(
                 embedding=np.random.rand(settings.embedding_dimension).tolist(),
+                query_text="test query",
                 top_k=5,
                 library=None,
                 filter=None,
@@ -474,3 +491,75 @@ class TestStoreErrors:
 
         with pytest.raises(StoreError):
             store.list_libraries()
+
+
+class TestStoreHybridSearch:
+    """Hybrid search (BM25 + vector) tests."""
+
+    @pytest.mark.integration
+    def test_hybrid_finds_exact_term(self, store):
+        """Hybrid search retrieves a document by an exact term BM25 can match."""
+        doc_id = str(uuid.uuid4())
+        store.upsert_chunks(
+            [_make_chunk(doc_id=doc_id, content="deployment error code E-4021 in prod")]
+        )
+        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        results = store.search(
+            embedding=embedding,
+            query_text="E-4021",
+            top_k=5,
+            library=None,
+            filter=None,
+        )
+        assert any("E-4021" in r.content for r in results)
+
+    @pytest.mark.integration
+    def test_hybrid_empty_table_returns_empty(self, store):
+        """Hybrid search on empty table returns [] without raising."""
+        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        results = store.search(
+            embedding=embedding,
+            query_text="anything",
+            top_k=5,
+            library=None,
+            filter=None,
+        )
+        assert results == []
+
+    @pytest.mark.integration
+    def test_hybrid_respects_library_filter(self, store):
+        """Hybrid search with library filter excludes results from other libraries."""
+        doc_a, doc_b = str(uuid.uuid4()), str(uuid.uuid4())
+        store.upsert_chunks(
+            [_make_chunk(doc_id=doc_a, library="lib_a", content="alpha omega delta")]
+        )
+        store.upsert_chunks(
+            [_make_chunk(doc_id=doc_b, library="lib_b", content="alpha omega delta")]
+        )
+        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        results = store.search(
+            embedding=embedding,
+            query_text="alpha omega",
+            top_k=10,
+            library="lib_a",
+            filter=None,
+        )
+        assert all(r.library == "lib_a" for r in results)
+
+    @pytest.mark.unit
+    def test_hybrid_falls_back_to_vector_when_disabled(self, store, monkeypatch):
+        """Disabling hybrid_search_enabled falls back to vector-only search."""
+        import mcpvectordb.store as store_module
+
+        monkeypatch.setattr(store_module.settings, "hybrid_search_enabled", False)
+        doc_id = str(uuid.uuid4())
+        store.upsert_chunks([_make_chunk(doc_id=doc_id)])
+        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        results = store.search(
+            embedding=embedding,
+            query_text="test",
+            top_k=5,
+            library=None,
+            filter=None,
+        )
+        assert isinstance(results, list)
