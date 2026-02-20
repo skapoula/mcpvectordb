@@ -62,7 +62,7 @@ def _open_table(uri: str, table_name: str) -> lancedb.table.Table:
             "content_hash": "",
             "title": "",
             "content": "",
-            "embedding": [0.0] * 768,
+            "embedding": [0.0] * settings.embedding_dimension,
             "chunk_index": 0,
             "created_at": "",
             "metadata": "{}",
@@ -186,7 +186,7 @@ class Store:
         # At >50k chunks, create an IVF-PQ index with table.create_index('embedding')
 
         Args:
-            embedding: Query vector of shape (768,).
+            embedding: Query vector of shape (embedding_dimension,).
             top_k: Maximum number of results to return.
             library: Restrict search to this library if provided.
             filter: Additional metadata filters (unused in v1, reserved).

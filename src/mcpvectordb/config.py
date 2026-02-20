@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     # Embedding
     embedding_model: str = "nomic-embed-text-v1.5"
     embedding_batch_size: int = 32
+    # Must match EMBEDDING_MODEL output size; changing requires full re-index
+    embedding_dimension: int = 768
 
     # Chunking
     chunk_size_tokens: int = 512

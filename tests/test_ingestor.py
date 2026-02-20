@@ -343,8 +343,10 @@ class TestIngestHelpers:
         self, monkeypatch
     ):
         """IngestionError is raised when MarkItDown fails in _convert_html_bytes (lines 231-232)."""
-        import markitdown
         from unittest.mock import MagicMock
+
+        import markitdown
+
         from mcpvectordb.exceptions import IngestionError
         from mcpvectordb.ingestor import _convert_html_bytes
 

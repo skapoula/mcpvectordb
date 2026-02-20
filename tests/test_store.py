@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 import numpy as np
 import pytest
 
+from mcpvectordb.config import settings
 from mcpvectordb.store import ChunkRecord
 
 
@@ -29,7 +30,7 @@ def _make_chunk(
         content_hash=content_hash,
         title="Test Document",
         content=content,
-        embedding=embedding or np.random.rand(768).astype(np.float32).tolist(),
+        embedding=embedding or np.random.rand(settings.embedding_dimension).astype(np.float32).tolist(),
         chunk_index=chunk_index,
         created_at=datetime.now(UTC).isoformat(),
         metadata=json.dumps({}),
@@ -79,7 +80,7 @@ class TestStoreSearch:
     @pytest.mark.integration
     def test_search_empty_table_returns_empty(self, store):
         """Searching an empty table returns [] without raising."""
-        embedding = np.random.rand(768).astype(np.float32).tolist()
+        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
         result = store.search(embedding=embedding, top_k=5, library=None, filter=None)
         assert result == []
 
@@ -90,7 +91,7 @@ class TestStoreSearch:
         chunks = [_make_chunk(doc_id=doc_id, chunk_index=i) for i in range(10)]
         store.upsert_chunks(chunks)
 
-        embedding = np.random.rand(768).astype(np.float32).tolist()
+        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
         result = store.search(embedding=embedding, top_k=3, library=None, filter=None)
         assert len(result) <= 3
 
@@ -107,7 +108,7 @@ class TestStoreSearch:
         ]
         store.upsert_chunks(chunks_a + chunks_b)
 
-        embedding = np.random.rand(768).astype(np.float32).tolist()
+        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
         result = store.search(
             embedding=embedding, top_k=10, library="lib_a", filter=None
         )
@@ -357,10 +358,12 @@ class TestStoreErrors:
     @pytest.mark.unit
     def test_open_table_raises_store_error_on_connect_failure(self, monkeypatch):
         """_open_table raises StoreError when lancedb.connect fails (lines 73-74)."""
-        import lancedb
         from unittest.mock import MagicMock
-        from mcpvectordb.store import _open_table
+
+        import lancedb
+
         from mcpvectordb.exceptions import StoreError
+        from mcpvectordb.store import _open_table
 
         monkeypatch.setattr(
             lancedb, "connect", MagicMock(side_effect=RuntimeError("no db"))
@@ -373,6 +376,7 @@ class TestStoreErrors:
     def test_upsert_chunks_raises_store_error(self, store, monkeypatch):
         """upsert_chunks raises StoreError when the LanceDB write fails (lines 119-120)."""
         from unittest.mock import MagicMock
+
         from mcpvectordb.exceptions import StoreError
 
         monkeypatch.setattr(
@@ -386,6 +390,7 @@ class TestStoreErrors:
     def test_find_existing_raises_store_error(self, store, monkeypatch):
         """find_existing raises StoreError on LanceDB failure (lines 150-151)."""
         from unittest.mock import MagicMock
+
         from mcpvectordb.exceptions import StoreError
 
         monkeypatch.setattr(
@@ -399,6 +404,7 @@ class TestStoreErrors:
     def test_delete_document_raises_store_error(self, store, monkeypatch):
         """delete_document raises StoreError on LanceDB failure (lines 174-175)."""
         from unittest.mock import MagicMock
+
         from mcpvectordb.exceptions import StoreError
 
         monkeypatch.setattr(
@@ -412,6 +418,7 @@ class TestStoreErrors:
     def test_search_raises_store_error(self, store, monkeypatch):
         """search raises StoreError on LanceDB failure (lines 211-212)."""
         from unittest.mock import MagicMock
+
         from mcpvectordb.exceptions import StoreError
 
         monkeypatch.setattr(
@@ -420,13 +427,17 @@ class TestStoreErrors:
 
         with pytest.raises(StoreError):
             store.search(
-                embedding=np.random.rand(768).tolist(), top_k=5, library=None, filter=None
+                embedding=np.random.rand(settings.embedding_dimension).tolist(),
+                top_k=5,
+                library=None,
+                filter=None,
             )
 
     @pytest.mark.unit
     def test_get_document_raises_store_error(self, store, monkeypatch):
         """get_document raises StoreError on LanceDB failure (lines 236-237)."""
         from unittest.mock import MagicMock
+
         from mcpvectordb.exceptions import StoreError
 
         monkeypatch.setattr(
@@ -440,6 +451,7 @@ class TestStoreErrors:
     def test_list_documents_raises_store_error(self, store, monkeypatch):
         """list_documents raises StoreError on LanceDB failure (lines 287-288)."""
         from unittest.mock import MagicMock
+
         from mcpvectordb.exceptions import StoreError
 
         monkeypatch.setattr(
@@ -453,6 +465,7 @@ class TestStoreErrors:
     def test_list_libraries_raises_store_error(self, store, monkeypatch):
         """list_libraries raises StoreError on LanceDB failure (lines 326-327)."""
         from unittest.mock import MagicMock
+
         from mcpvectordb.exceptions import StoreError
 
         monkeypatch.setattr(

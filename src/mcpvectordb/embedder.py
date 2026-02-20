@@ -46,13 +46,13 @@ class Embedder:
             texts: List of document chunk strings to embed.
 
         Returns:
-            Float32 array of shape (len(texts), 768).
+            Float32 array of shape (len(texts), embedding_dimension).
 
         Raises:
             EmbeddingError: If the model fails to produce embeddings.
         """
         if not texts:
-            return np.empty((0, 768), dtype=np.float32)
+            return np.empty((0, settings.embedding_dimension), dtype=np.float32)
         try:
             prefixed = [_DOC_PREFIX + t for t in texts]
             vecs = self._model.encode(
@@ -74,7 +74,7 @@ class Embedder:
             query: Natural-language search query.
 
         Returns:
-            Float32 array of shape (768,).
+            Float32 array of shape (embedding_dimension,).
 
         Raises:
             EmbeddingError: If the model fails to produce an embedding.

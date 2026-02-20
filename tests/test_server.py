@@ -6,6 +6,8 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
+from mcpvectordb.config import settings
+
 
 def run(coro):
     """Run a coroutine synchronously in tests."""
@@ -206,7 +208,7 @@ class TestSearchTool:
         )
         # Patch get_embedder to return a mock
         mock_emb = MagicMock()
-        mock_emb.embed_query.return_value = np.random.rand(768).astype(np.float32)
+        mock_emb.embed_query.return_value = np.random.rand(settings.embedding_dimension).astype(np.float32)
         monkeypatch.setattr("mcpvectordb.server.get_embedder", lambda: mock_emb)
 
         result = run(server.search(query="machine learning", top_k=5))
@@ -224,7 +226,7 @@ class TestSearchTool:
         monkeypatch.setattr("mcpvectordb.server._store", bad_store)
 
         mock_emb = MagicMock()
-        mock_emb.embed_query.return_value = np.random.rand(768).astype(np.float32)
+        mock_emb.embed_query.return_value = np.random.rand(settings.embedding_dimension).astype(np.float32)
         monkeypatch.setattr("mcpvectordb.server.get_embedder", lambda: mock_emb)
 
         result = run(server.search(query="test query"))
@@ -241,7 +243,7 @@ class TestSearchTool:
         monkeypatch.setattr("mcpvectordb.server._store", bad_store)
 
         mock_emb = MagicMock()
-        mock_emb.embed_query.return_value = np.random.rand(768).astype(np.float32)
+        mock_emb.embed_query.return_value = np.random.rand(settings.embedding_dimension).astype(np.float32)
         monkeypatch.setattr("mcpvectordb.server.get_embedder", lambda: mock_emb)
 
         result = run(server.search(query="test query"))
@@ -419,6 +421,7 @@ class TestGetDocumentTool:
         import json
         import uuid
         from datetime import UTC, datetime
+
         from mcpvectordb import server
         from mcpvectordb.store import ChunkRecord
 
@@ -432,7 +435,7 @@ class TestGetDocumentTool:
             content_hash="testhash",
             title="Test Document",
             content="Hello World chunk content.",
-            embedding=[0.1] * 768,
+            embedding=[0.1] * settings.embedding_dimension,
             chunk_index=0,
             created_at=datetime.now(UTC).isoformat(),
             metadata=json.dumps({"author": "Test"}),
@@ -480,8 +483,8 @@ class TestMainFunction:
     @pytest.mark.unit
     def test_main_runs_with_stdio_transport(self, monkeypatch):
         """main() calls mcp.run(transport='stdio') when configured (lines 276-284)."""
-        import mcpvectordb.server as server_mod
         import mcpvectordb.config as config_mod
+        import mcpvectordb.server as server_mod
 
         mock_run = MagicMock()
         monkeypatch.setattr(server_mod.mcp, "run", mock_run)
@@ -495,8 +498,8 @@ class TestMainFunction:
     @pytest.mark.unit
     def test_main_runs_with_sse_transport(self, monkeypatch):
         """main() calls mcp.run with SSE parameters when transport='sse' (lines 285-290)."""
-        import mcpvectordb.server as server_mod
         import mcpvectordb.config as config_mod
+        import mcpvectordb.server as server_mod
 
         mock_run = MagicMock()
         monkeypatch.setattr(server_mod.mcp, "run", mock_run)
