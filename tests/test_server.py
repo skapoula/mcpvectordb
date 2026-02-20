@@ -439,6 +439,9 @@ class TestGetDocumentTool:
             chunk_index=0,
             created_at=datetime.now(UTC).isoformat(),
             metadata=json.dumps({"author": "Test"}),
+            file_type="pdf",
+            last_modified="",
+            page=0,
         )
         store.upsert_chunks([record])
 

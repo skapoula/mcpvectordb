@@ -20,6 +20,9 @@ def _make_chunk(
     chunk_index: int = 0,
     content_hash: str = "abc123",
     embedding: list[float] | None = None,
+    file_type: str = "pdf",
+    last_modified: str = "",
+    page: int = 0,
 ) -> ChunkRecord:
     """Build a minimal ChunkRecord for testing."""
     return ChunkRecord(
@@ -34,6 +37,9 @@ def _make_chunk(
         chunk_index=chunk_index,
         created_at=datetime.now(UTC).isoformat(),
         metadata=json.dumps({}),
+        file_type=file_type,
+        last_modified=last_modified,
+        page=page,
     )
 
 
@@ -491,6 +497,56 @@ class TestStoreErrors:
 
         with pytest.raises(StoreError):
             store.list_libraries()
+
+
+class TestStoreSchemaMigration:
+    """Tests for _migrate_table — adding new columns to pre-existing tables."""
+
+    @pytest.mark.integration
+    def test_migrate_adds_new_columns_to_old_table(self, lancedb_dir):
+        """_open_table adds file_type, last_modified, page to a pre-existing table."""
+        import lancedb as _lancedb
+
+        from mcpvectordb.store import _open_table
+
+        # Create a table with the old schema (no new fields)
+        db = _lancedb.connect(str(lancedb_dir))
+        db.create_table(
+            "old_docs",
+            data=[
+                {
+                    "id": "seed",
+                    "doc_id": "d1",
+                    "library": "default",
+                    "source": "test.pdf",
+                    "content_hash": "abc",
+                    "title": "T",
+                    "content": "c",
+                    "embedding": [0.0] * settings.embedding_dimension,
+                    "chunk_index": 0,
+                    "created_at": "2024-01-01",
+                    "metadata": "{}",
+                }
+            ],
+        )
+
+        # Opening via _open_table must trigger migration
+        table = _open_table(str(lancedb_dir), "old_docs")
+        col_names = {field.name for field in table.schema}
+
+        assert "file_type" in col_names
+        assert "last_modified" in col_names
+        assert "page" in col_names
+
+    @pytest.mark.integration
+    def test_migrate_is_idempotent(self, lancedb_dir):
+        """Opening an already-migrated table a second time does not raise."""
+        from mcpvectordb.store import _open_table
+
+        # First open creates the table with the current schema
+        _open_table(str(lancedb_dir), "docs")
+        # Second open should run migration but find nothing to add
+        _open_table(str(lancedb_dir), "docs")
 
 
 class TestStoreHybridSearch:

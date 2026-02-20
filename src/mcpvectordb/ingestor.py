@@ -58,13 +58,20 @@ async def ingest(
 
     # ── 1. Fetch raw bytes ─────────────────────────────────────────────────────
     if is_url:
-        raw_bytes = await _fetch_url(source_str)
+        raw_bytes, last_modified = await _fetch_url(source_str)
+        file_type = "url"
     else:
         path = Path(source) if not isinstance(source, Path) else source
         try:
             raw_bytes = await asyncio.to_thread(path.read_bytes)
         except OSError as e:
             raise IngestionError(f"Cannot read file {source_str!r}") from e
+        file_type = path.suffix.lstrip(".").lower() or "unknown"
+        try:
+            mtime = path.stat().st_mtime
+            last_modified = datetime.fromtimestamp(mtime, UTC).isoformat()
+        except OSError:
+            last_modified = ""
 
     # ── 2. Dedup check ─────────────────────────────────────────────────────────
     new_hash = hashlib.sha256(raw_bytes).hexdigest()
@@ -142,6 +149,9 @@ async def ingest(
             chunk_index=i,
             created_at=now,
             metadata=meta_json,
+            file_type=file_type,
+            last_modified=last_modified,
+            page=0,
         )
         for i, chunk_text in enumerate(chunks)
     ]
@@ -168,14 +178,14 @@ async def ingest(
     )
 
 
-async def _fetch_url(url: str) -> bytes:
-    """Fetch a URL and return its raw bytes.
+async def _fetch_url(url: str) -> tuple[bytes, str]:
+    """Fetch a URL and return its raw bytes and last-modified timestamp.
 
     Args:
         url: The URL to fetch.
 
     Returns:
-        Raw response bytes.
+        Tuple of (raw response bytes, ISO 8601 last-modified string or "").
 
     Raises:
         IngestionError: On network error or non-2xx status.
@@ -188,7 +198,8 @@ async def _fetch_url(url: str) -> bytes:
         ) as client:
             response = await client.get(url)
             response.raise_for_status()
-            return response.content
+            last_modified = response.headers.get("last-modified", "")
+            return response.content, last_modified
     except httpx.HTTPStatusError as e:
         raise IngestionError(f"HTTP {e.response.status_code} fetching {url!r}") from e
     except httpx.RequestError as e:

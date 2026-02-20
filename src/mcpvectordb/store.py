@@ -28,6 +28,9 @@ class ChunkRecord(BaseModel):
     chunk_index: int
     created_at: str
     metadata: str  # JSON-serialised dict
+    file_type: str  # e.g. "pdf", "docx", "html", "url"; "unknown" if undetectable
+    last_modified: str  # ISO 8601 from file mtime or HTTP Last-Modified; "" if unknown
+    page: int  # 1-indexed page number; 0 = unknown or not applicable
 
 
 def _open_table(uri: str, table_name: str) -> lancedb.table.Table:
@@ -53,6 +56,7 @@ def _open_table(uri: str, table_name: str) -> lancedb.table.Table:
         )
         if table_name in existing:
             table = db.open_table(table_name)
+            _migrate_table(table)
         else:
             # Create table with a dummy record to establish schema, then delete it
             schema_record = {
@@ -67,6 +71,9 @@ def _open_table(uri: str, table_name: str) -> lancedb.table.Table:
                 "chunk_index": 0,
                 "created_at": "",
                 "metadata": "{}",
+                "file_type": "",
+                "last_modified": "",
+                "page": 0,
             }
             table = db.create_table(table_name, data=[schema_record])
             table.delete("id = '_schema_init_'")
@@ -83,6 +90,29 @@ def _open_table(uri: str, table_name: str) -> lancedb.table.Table:
         raise StoreError(
             f"Failed to open LanceDB table {table_name!r} at {uri!r}"
         ) from e
+
+
+def _migrate_table(table: lancedb.table.Table) -> None:
+    """Add columns introduced in later schema versions to an existing table.
+
+    Args:
+        table: Open LanceDB table to migrate in place.
+    """
+    existing = {field.name for field in table.schema}
+    to_add: dict[str, str] = {}
+    if "file_type" not in existing:
+        to_add["file_type"] = "''"
+    if "last_modified" not in existing:
+        to_add["last_modified"] = "''"
+    if "page" not in existing:
+        to_add["page"] = "CAST(0 AS INT)"
+    if not to_add:
+        return
+    try:
+        table.add_columns(to_add)
+        logger.info("Migrated table schema: added columns %s", list(to_add))
+    except Exception as e:
+        logger.warning("Schema migration failed — old data may lack new fields: %s", e)
 
 
 class Store:

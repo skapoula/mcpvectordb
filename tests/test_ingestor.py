@@ -94,6 +94,34 @@ class TestIngestFile:
         with pytest.raises(IngestionError):
             run(ingest(source=missing, library="default", metadata=None, store=store))
 
+    @pytest.mark.integration
+    def test_ingest_file_sets_file_type_and_last_modified(
+        self, tmp_path, store, mock_embedder, _patch_chunker, _patch_converter
+    ):
+        """Chunks store the correct file_type, a non-empty last_modified, and page=0."""
+        f = tmp_path / "report.pdf"
+        f.write_bytes(b"%PDF-1.4 minimal")
+
+        result = run(ingest(source=f, library="default", metadata=None, store=store))
+        chunks = store.get_document(result.doc_id)
+
+        assert all(c.file_type == "pdf" for c in chunks)
+        assert all(c.last_modified != "" for c in chunks)
+        assert all(c.page == 0 for c in chunks)
+
+    @pytest.mark.integration
+    def test_ingest_file_type_matches_extension(
+        self, tmp_path, store, mock_embedder, _patch_chunker, _patch_converter
+    ):
+        """file_type is derived from the file extension, lowercased."""
+        f = tmp_path / "slides.DOCX"
+        f.write_bytes(b"PK fake docx content")
+
+        result = run(ingest(source=f, library="default", metadata=None, store=store))
+        chunks = store.get_document(result.doc_id)
+
+        assert all(c.file_type == "docx" for c in chunks)
+
 
 class TestIngestURL:
     """Tests for URL ingestion with mocked httpx."""
@@ -155,6 +183,54 @@ class TestIngestURL:
                     store=store,
                 )
             )
+
+    @pytest.mark.integration
+    def test_ingest_url_sets_file_type_url(
+        self, store, mock_embedder, _patch_chunker, httpx_mock
+    ):
+        """URL ingestion sets file_type='url' and page=0 on every chunk."""
+        httpx_mock.add_response(
+            url="https://example.com/page",
+            content=b"<html><body><h1>Title</h1><p>Content.</p></body></html>",
+            status_code=200,
+        )
+
+        result = run(
+            ingest(
+                source="https://example.com/page",
+                library="web",
+                metadata=None,
+                store=store,
+            )
+        )
+        chunks = store.get_document(result.doc_id)
+
+        assert all(c.file_type == "url" for c in chunks)
+        assert all(c.page == 0 for c in chunks)
+
+    @pytest.mark.integration
+    def test_ingest_url_uses_last_modified_header(
+        self, store, mock_embedder, _patch_chunker, httpx_mock
+    ):
+        """last_modified is populated from the HTTP Last-Modified response header."""
+        httpx_mock.add_response(
+            url="https://example.com/dated",
+            content=b"<html><body><p>Content.</p></body></html>",
+            status_code=200,
+            headers={"Last-Modified": "Wed, 01 Jan 2025 00:00:00 GMT"},
+        )
+
+        result = run(
+            ingest(
+                source="https://example.com/dated",
+                library="web",
+                metadata=None,
+                store=store,
+            )
+        )
+        chunks = store.get_document(result.doc_id)
+
+        assert all(c.last_modified == "Wed, 01 Jan 2025 00:00:00 GMT" for c in chunks)
 
 
 class TestIngestDedup:
