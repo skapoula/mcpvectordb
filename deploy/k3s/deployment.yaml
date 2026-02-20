@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcpvectordb
+  namespace: default
+  labels:
+    app: mcpvectordb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcpvectordb
+  template:
+    metadata:
+      labels:
+        app: mcpvectordb
+    spec:
+      containers:
+        - name: mcpvectordb
+          image: mcpvectordb:0.1.0
+          ports:
+            - containerPort: 8000
+          env:
+            - name: MCP_TRANSPORT
+              value: "sse"
+            - name: MCP_HOST
+              value: "0.0.0.0"
+            - name: MCP_PORT
+              value: "8000"
+            - name: LANCEDB_URI
+              value: "/data/lancedb"
+            - name: LOG_LEVEL
+              value: "INFO"
+          volumeMounts:
+            - name: lancedb-data
+              mountPath: /data/lancedb
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+      volumes:
+        - name: lancedb-data
+          persistentVolumeClaim:
+            claimName: mcpvectordb-lancedb

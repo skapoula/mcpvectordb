@@ -1,0 +1,73 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mcpvectordb"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp",
+    "lancedb",
+    "sentence-transformers",
+    "transformers",
+    "markitdown[all]",
+    "httpx",
+    "pydantic",
+    "pydantic-settings",
+    "python-dotenv",
+    "numpy",
+]
+
+[project.scripts]
+mcpvectordb = "mcpvectordb.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcpvectordb"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+addopts = "-m 'not slow'"
+markers = [
+    "slow: audio transcription, image OCR, embedding model load (deselected by default)",
+    "integration: writes to real (tmp) LanceDB on disk",
+    "unit: pure functions — no I/O, no filesystem, no network",
+]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "lancedb",
+    "sentence_transformers",
+    "markitdown",
+    "transformers",
+]
+ignore_missing_imports = true
+
+[tool.bandit]
+exclude_dirs = ["tests", "venv", ".venv"]
+skips = ["B101"]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "pytest-httpx",
+    "pytest-asyncio",
+    "ruff",
+    "mypy",
+    "bandit",
+]

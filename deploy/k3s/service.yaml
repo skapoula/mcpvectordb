@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcpvectordb
+  namespace: default
+spec:
+  selector:
+    app: mcpvectordb
+  ports:
+    - name: sse
+      protocol: TCP
+      port: 8000
+      targetPort: 8000
+  type: ClusterIP
