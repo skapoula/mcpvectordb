@@ -229,7 +229,11 @@ class Store:
                     )
                     if safe_lib is not None:
                         query = query.where(f"library = '{safe_lib}'")
-                    rows = query.limit(top_k).to_list()
+                    rows = (
+                        query.refine_factor(settings.search_refine_factor)
+                        .limit(top_k)
+                        .to_list()
+                    )
                 else:
                     raise ValueError("hybrid disabled")
             except Exception as hybrid_err:
@@ -240,7 +244,11 @@ class Store:
                 q = table.search(np.array(embedding, dtype=np.float32))
                 if safe_lib is not None:
                     q = q.where(f"library = '{safe_lib}'")
-                rows = q.limit(top_k).to_list()
+                rows = (
+                    q.refine_factor(settings.search_refine_factor)
+                    .limit(top_k)
+                    .to_list()
+                )
 
             return [
                 ChunkRecord(**{k: v for k, v in row.items() if k != "_distance"})

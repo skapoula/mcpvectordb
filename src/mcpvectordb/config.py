@@ -33,6 +33,7 @@ class Settings(BaseSettings):
 
     # Search
     hybrid_search_enabled: bool = True  # BM25 + vector; disable for pure vector mode
+    search_refine_factor: int = 10  # re-rank top N*refine_factor exact results for recall
 
     # Chunking
     chunk_size_tokens: int = 512

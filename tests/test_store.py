@@ -563,3 +563,47 @@ class TestStoreHybridSearch:
             filter=None,
         )
         assert isinstance(results, list)
+
+    @pytest.mark.unit
+    def test_refine_factor_applied(self, store, monkeypatch):
+        """search() calls refine_factor() with the configured value on both paths."""
+        from unittest.mock import MagicMock, patch
+
+        import mcpvectordb.store as store_module
+
+        doc_id = str(uuid.uuid4())
+        store.upsert_chunks([_make_chunk(doc_id=doc_id)])
+
+        captured: list[int] = []
+
+        original_table = store._table
+
+        def patched_table():
+            tbl = original_table()
+            original_search = tbl.search
+
+            def recording_search(*args, **kwargs):
+                builder = original_search(*args, **kwargs)
+                original_rf = builder.refine_factor
+
+                def capture_rf(n):
+                    captured.append(n)
+                    return original_rf(n)
+
+                builder.refine_factor = capture_rf
+                return builder
+
+            tbl.search = recording_search
+            return tbl
+
+        monkeypatch.setattr(store_module.settings, "hybrid_search_enabled", False)
+        monkeypatch.setattr(store, "_table", patched_table)
+        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        store.search(
+            embedding=embedding,
+            query_text="test",
+            top_k=5,
+            library=None,
+            filter=None,
+        )
+        assert captured == [settings.search_refine_factor]
