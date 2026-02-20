@@ -499,6 +499,144 @@ class TestStoreErrors:
             store.list_libraries()
 
 
+class TestStoreFilter:
+    """Tests for the filter parameter on Store.search()."""
+
+    @pytest.mark.integration
+    def test_filter_by_file_type(self, store):
+        """filter={'file_type': 'pdf'} excludes chunks with a different file_type."""
+        doc_pdf = str(uuid.uuid4())
+        doc_html = str(uuid.uuid4())
+        store.upsert_chunks(
+            [_make_chunk(doc_id=doc_pdf, file_type="pdf", content="pdf content here")]
+        )
+        store.upsert_chunks(
+            [_make_chunk(doc_id=doc_html, file_type="html", content="html content here")]
+        )
+
+        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        results = store.search(
+            embedding=embedding,
+            query_text="content",
+            top_k=10,
+            library=None,
+            filter={"file_type": "pdf"},
+        )
+        assert results
+        assert all(r.file_type == "pdf" for r in results)
+
+    @pytest.mark.integration
+    def test_filter_by_page(self, store):
+        """filter={'page': 2} returns only chunks with page == 2."""
+        doc_id = str(uuid.uuid4())
+        store.upsert_chunks(
+            [
+                _make_chunk(doc_id=doc_id, chunk_index=0, page=1, content="page one text"),
+                _make_chunk(doc_id=doc_id, chunk_index=1, page=2, content="page two text"),
+            ]
+        )
+
+        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        results = store.search(
+            embedding=embedding,
+            query_text="page",
+            top_k=10,
+            library=None,
+            filter={"page": 2},
+        )
+        assert results
+        assert all(r.page == 2 for r in results)
+
+    @pytest.mark.integration
+    def test_filter_combined_with_library(self, store):
+        """library param and filter dict are AND-ed together."""
+        doc_a = str(uuid.uuid4())
+        doc_b = str(uuid.uuid4())
+        store.upsert_chunks(
+            [_make_chunk(doc_id=doc_a, library="lib_a", file_type="pdf")]
+        )
+        store.upsert_chunks(
+            [_make_chunk(doc_id=doc_b, library="lib_a", file_type="html")]
+        )
+
+        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        results = store.search(
+            embedding=embedding,
+            query_text="test",
+            top_k=10,
+            library="lib_a",
+            filter={"file_type": "pdf"},
+        )
+        assert all(r.library == "lib_a" and r.file_type == "pdf" for r in results)
+
+    @pytest.mark.unit
+    def test_invalid_filter_key_raises_store_error(self, store, monkeypatch):
+        """A filter key with invalid characters raises StoreError."""
+        from mcpvectordb.exceptions import StoreError
+
+        monkeypatch.setattr(
+            store, "_table", lambda: None
+        )  # table not needed — error is raised before use
+        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        with pytest.raises(StoreError):
+            store.search(
+                embedding=embedding,
+                query_text="test",
+                top_k=5,
+                library=None,
+                filter={"bad-key; DROP TABLE": "value"},
+            )
+
+    @pytest.mark.unit
+    def test_build_where_clause_library_only(self):
+        """_build_where_clause with library and no filter returns library condition."""
+        from mcpvectordb.store import _build_where_clause
+
+        result = _build_where_clause("mylib", None)
+        assert result == "library = 'mylib'"
+
+    @pytest.mark.unit
+    def test_build_where_clause_filter_only(self):
+        """_build_where_clause with no library and a filter returns filter condition."""
+        from mcpvectordb.store import _build_where_clause
+
+        result = _build_where_clause(None, {"file_type": "pdf"})
+        assert result == "file_type = 'pdf'"
+
+    @pytest.mark.unit
+    def test_build_where_clause_combined(self):
+        """_build_where_clause combines library and filter with AND."""
+        from mcpvectordb.store import _build_where_clause
+
+        result = _build_where_clause("lib_a", {"file_type": "pdf"})
+        assert result == "library = 'lib_a' AND file_type = 'pdf'"
+
+    @pytest.mark.unit
+    def test_build_where_clause_none_when_empty(self):
+        """_build_where_clause returns None when both library and filter are empty."""
+        from mcpvectordb.store import _build_where_clause
+
+        assert _build_where_clause(None, None) is None
+        assert _build_where_clause(None, {}) is None
+
+    @pytest.mark.unit
+    def test_build_where_clause_int_value_unquoted(self):
+        """Integer filter values are not quoted in the WHERE clause."""
+        from mcpvectordb.store import _build_where_clause
+
+        result = _build_where_clause(None, {"page": 3})
+        assert result == "page = 3"
+
+    @pytest.mark.unit
+    def test_build_where_clause_escapes_single_quotes(self):
+        """Single quotes in values are escaped to prevent SQL injection."""
+        from mcpvectordb.store import _build_where_clause
+
+        result = _build_where_clause("lib's", {"file_type": "it's a pdf"})
+        assert "lib''s" in result
+        assert "it''s a pdf" in result
+
+
 class TestStoreSchemaMigration:
     """Tests for _migrate_table — adding new columns to pre-existing tables."""
 

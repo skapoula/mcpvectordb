@@ -10,9 +10,10 @@
 | Field | Value |
 |-------|-------|
 | Name | `mcpvectordb` |
-| Version | `0.1.0` |
+| Version | `0.2.0` |
 | Transport | `stdio` (default) or `sse` (HTTP, k3s) |
 | Embedding model | `nomic-embed-text-v1.5` (768d) |
+| Search | Hybrid BM25 + vector (reciprocal rank fusion) |
 
 ---
 
@@ -83,7 +84,21 @@ Semantic search over indexed document chunks.
 | `query` | `string` | Yes | — | Natural language search query |
 | `top_k` | `integer` | No | `5` | Max results to return (1–100) |
 | `library` | `string \| null` | No | `null` | Restrict to library; `null` = all libraries |
-| `filter` | `object \| null` | No | `null` | Reserved for metadata filters (v1: unused) |
+| `filter` | `object \| null` | No | `null` | Field equality filters (see below) |
+
+**`filter` format:**
+
+An object mapping any `ChunkRecord` field name to a value. All conditions are AND-ed.
+String and integer values are supported. Invalid key names raise an error.
+
+```json
+{ "file_type": "pdf" }
+{ "file_type": "pdf", "page": 3 }
+{ "last_modified": "2025-01-01T00:00:00+00:00" }
+```
+
+Useful filterable fields: `file_type`, `page`, `last_modified`, `source`, `title`.
+The `library` parameter is the preferred way to filter by library; it can also appear in `filter`.
 
 **Output schema (success):**
 
@@ -95,6 +110,9 @@ Semantic search over indexed document chunks.
       "source": "/path/or/url",
       "title": "Document Title",
       "library": "default",
+      "file_type": "pdf",
+      "last_modified": "2025-06-01T09:00:00+00:00",
+      "page": 0,
       "content": "The matching chunk text...",
       "chunk_index": 3,
       "metadata": {}
@@ -103,7 +121,8 @@ Semantic search over indexed document chunks.
 }
 ```
 
-Results are sorted by semantic relevance descending.
+Results are sorted by hybrid relevance (BM25 + vector) descending.
+`page` is `0` when the page number is unknown or not applicable.
 
 ---
 

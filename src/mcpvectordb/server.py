@@ -122,7 +122,9 @@ async def search(
         query: Natural language search query.
         top_k: Maximum number of results to return (default 5).
         library: Restrict search to this library. Searches all if None.
-        filter: Reserved for future metadata filtering (unused in v1).
+        filter: Optional equality filters applied before ranking.
+            Supported keys: any ChunkRecord field (e.g. ``file_type``, ``page``).
+            Example: ``{"file_type": "pdf"}`` or ``{"page": 3}``.
 
     Returns:
         Dict with 'results' list of matching chunks.
@@ -149,6 +151,9 @@ async def search(
                     "source": r.source,
                     "title": r.title,
                     "library": r.library,
+                    "file_type": r.file_type,
+                    "last_modified": r.last_modified,
+                    "page": r.page,
                     "content": r.content,
                     "chunk_index": r.chunk_index,
                     "metadata": json.loads(r.metadata),

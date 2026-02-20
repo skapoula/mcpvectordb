@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from pathlib import Path
 
 import lancedb
@@ -113,6 +114,43 @@ def _migrate_table(table: lancedb.table.Table) -> None:
         logger.info("Migrated table schema: added columns %s", list(to_add))
     except Exception as e:
         logger.warning("Schema migration failed — old data may lack new fields: %s", e)
+
+
+_SAFE_KEY = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+def _build_where_clause(
+    library: str | None,
+    filter: dict | None,  # noqa: A002
+) -> str | None:
+    """Build a SQL WHERE clause from a library restriction and field equality filters.
+
+    Args:
+        library: Restrict results to this library name if provided.
+        filter: Optional dict mapping column names to equality values.
+            String values are single-quoted; int values are unquoted.
+            Keys must match ``[a-zA-Z_][a-zA-Z0-9_]*``.
+
+    Returns:
+        SQL WHERE clause string, or None if there are no conditions.
+
+    Raises:
+        StoreError: If a filter key contains invalid characters.
+    """
+    conditions: list[str] = []
+    if library is not None:
+        safe_lib = library.replace("'", "''")
+        conditions.append(f"library = '{safe_lib}'")
+    if filter:
+        for key, value in filter.items():
+            if not _SAFE_KEY.match(key):
+                raise StoreError(f"Invalid filter key: {key!r}")
+            if isinstance(value, int):
+                conditions.append(f"{key} = {value}")
+            else:
+                safe_val = str(value).replace("'", "''")
+                conditions.append(f"{key} = '{safe_val}'")
+    return " AND ".join(conditions) if conditions else None
 
 
 class Store:
@@ -240,25 +278,26 @@ class Store:
             query_text: Raw query string for the BM25 leg of hybrid search.
             top_k: Maximum number of results to return.
             library: Restrict search to this library if provided.
-            filter: Additional metadata filters (unused in v1, reserved).
+            filter: Optional equality filters, e.g. ``{"file_type": "pdf"}``.
+                Keys must be valid column names; string and int values supported.
 
         Returns:
             List of ChunkRecord objects sorted by relevance descending.
 
         Raises:
-            StoreError: If the search fails.
+            StoreError: If the search fails or a filter key is invalid.
         """
         try:
             table = self._table()
-            safe_lib = library.replace("'", "''") if library is not None else None
+            where = _build_where_clause(library, filter)
 
             try:
                 if settings.hybrid_search_enabled:
                     query = table.search(query_text, query_type="hybrid").vector(
                         np.array(embedding, dtype=np.float32)
                     )
-                    if safe_lib is not None:
-                        query = query.where(f"library = '{safe_lib}'")
+                    if where is not None:
+                        query = query.where(where)
                     rows = (
                         query.refine_factor(settings.search_refine_factor)
                         .limit(top_k)
@@ -272,8 +311,8 @@ class Store:
                         "Hybrid search fell back to vector-only: %s", hybrid_err
                     )
                 q = table.search(np.array(embedding, dtype=np.float32))
-                if safe_lib is not None:
-                    q = q.where(f"library = '{safe_lib}'")
+                if where is not None:
+                    q = q.where(where)
                 rows = (
                     q.refine_factor(settings.search_refine_factor)
                     .limit(top_k)
