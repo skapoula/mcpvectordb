@@ -319,3 +319,4 @@ Extends global Do Not. Project-specific hard rules:
 
 @.claude/rules/code-style.md
 @.claude/rules/testing.md
+@.claude/rules/lancedb-best-practices.md
