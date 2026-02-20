@@ -113,9 +113,10 @@ async def search(
     library: str | None = None,
     filter: dict | None = None,  # noqa: A002
 ) -> dict:
-    """Semantic search over the indexed document library.
+    """Hybrid search (BM25 + vector) over the indexed document library.
 
-    Embeds the query and returns the most similar document chunks.
+    Embeds the query for semantic search and uses the raw text for BM25 full-text
+    search, combining both via reciprocal rank fusion for improved retrieval.
 
     Args:
         query: Natural language search query.
@@ -136,6 +137,7 @@ async def search(
         embedding = await asyncio.to_thread(get_embedder().embed_query, query)
         records = _store.search(
             embedding=embedding.tolist(),
+            query_text=query,
             top_k=top_k,
             library=library,
             filter=filter,

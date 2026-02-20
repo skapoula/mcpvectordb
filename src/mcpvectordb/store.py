@@ -52,23 +52,32 @@ def _open_table(uri: str, table_name: str) -> lancedb.table.Table:
             table_list.tables if hasattr(table_list, "tables") else list(table_list)
         )
         if table_name in existing:
-            return db.open_table(table_name)
-        # Create table with a dummy record to establish schema, then delete it
-        schema_record = {
-            "id": "_schema_init_",
-            "doc_id": "",
-            "library": "",
-            "source": "",
-            "content_hash": "",
-            "title": "",
-            "content": "",
-            "embedding": [0.0] * 768,
-            "chunk_index": 0,
-            "created_at": "",
-            "metadata": "{}",
-        }
-        table = db.create_table(table_name, data=[schema_record])
-        table.delete("id = '_schema_init_'")
+            table = db.open_table(table_name)
+        else:
+            # Create table with a dummy record to establish schema, then delete it
+            schema_record = {
+                "id": "_schema_init_",
+                "doc_id": "",
+                "library": "",
+                "source": "",
+                "content_hash": "",
+                "title": "",
+                "content": "",
+                "embedding": [0.0] * settings.embedding_dimension,
+                "chunk_index": 0,
+                "created_at": "",
+                "metadata": "{}",
+            }
+            table = db.create_table(table_name, data=[schema_record])
+            table.delete("id = '_schema_init_'")
+        # Create scalar indexes on commonly filtered columns (idempotent)
+        for col in ("library", "doc_id", "source"):
+            try:
+                table.create_scalar_index(col, replace=True)
+            except Exception:
+                logger.debug(
+                    "Scalar index on %r not created (may need data first)", col
+                )
         return table
     except Exception as e:
         raise StoreError(
@@ -116,6 +125,13 @@ class Store:
             rows = [c.model_dump() for c in chunks]
             table.add(rows)
             logger.info("Upserted %d chunks (doc_id=%s)", len(chunks), chunks[0].doc_id)
+            try:
+                table.create_fts_index("content", replace=True)
+                logger.debug("FTS index rebuilt on 'content'")
+            except Exception as fts_err:
+                logger.warning(
+                    "FTS index rebuild failed (hybrid search degraded): %s", fts_err
+                )
         except Exception as e:
             raise StoreError(f"Failed to upsert {len(chunks)} chunks") from e
 
@@ -177,16 +193,21 @@ class Store:
     def search(
         self,
         embedding: list[float],
+        query_text: str,
         top_k: int,
         library: str | None,
         filter: dict | None,  # noqa: A002
     ) -> list[ChunkRecord]:
-        """Semantic search over stored chunks.
+        """Hybrid (BM25 + vector) search over stored chunks.
+
+        Attempts hybrid search when hybrid_search_enabled is True; falls back to
+        vector-only search if the FTS index is absent or the hybrid query fails.
 
         # At >50k chunks, create an IVF-PQ index with table.create_index('embedding')
 
         Args:
-            embedding: Query vector of shape (768,).
+            embedding: Query vector of shape (embedding_dimension,).
+            query_text: Raw query string for the BM25 leg of hybrid search.
             top_k: Maximum number of results to return.
             library: Restrict search to this library if provided.
             filter: Additional metadata filters (unused in v1, reserved).
@@ -199,11 +220,28 @@ class Store:
         """
         try:
             table = self._table()
-            query = table.search(np.array(embedding, dtype=np.float32))
-            if library is not None:
-                safe_lib = library.replace("'", "''")
-                query = query.where(f"library = '{safe_lib}'")
-            rows = query.limit(top_k).to_list()
+            safe_lib = library.replace("'", "''") if library is not None else None
+
+            try:
+                if settings.hybrid_search_enabled:
+                    query = table.search(query_text, query_type="hybrid").vector(
+                        np.array(embedding, dtype=np.float32)
+                    )
+                    if safe_lib is not None:
+                        query = query.where(f"library = '{safe_lib}'")
+                    rows = query.limit(top_k).to_list()
+                else:
+                    raise ValueError("hybrid disabled")
+            except Exception as hybrid_err:
+                if settings.hybrid_search_enabled:
+                    logger.warning(
+                        "Hybrid search fell back to vector-only: %s", hybrid_err
+                    )
+                q = table.search(np.array(embedding, dtype=np.float32))
+                if safe_lib is not None:
+                    q = q.where(f"library = '{safe_lib}'")
+                rows = q.limit(top_k).to_list()
+
             return [
                 ChunkRecord(**{k: v for k, v in row.items() if k != "_distance"})
                 for row in rows

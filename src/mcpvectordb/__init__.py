@@ -1,3 +1,8 @@
 """mcpvectordb — MCP server for semantic search over a personal document library."""
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("mcpvectordb")
+except PackageNotFoundError:
+    __version__ = "unknown"

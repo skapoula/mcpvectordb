@@ -3,6 +3,8 @@
 import numpy as np
 import pytest
 
+from mcpvectordb.config import settings
+
 
 class TestEmbedderShape:
     """Tests for vector dimensions and types (requires real model — slow)."""
@@ -72,10 +74,10 @@ class TestEmbedderSingleton:
     def test_mock_embedder_shape(self, mock_embedder):
         """Mock embedder returns correct shape for downstream tests."""
         result = mock_embedder.embed_documents(["a", "b"])
-        assert result.shape == (2, 768)
+        assert result.shape == (2, settings.embedding_dimension)
 
         q_result = mock_embedder.embed_query("query")
-        assert q_result.shape == (768,)
+        assert q_result.shape == (settings.embedding_dimension,)
 
 
 class TestEmbeddingError:
@@ -103,8 +105,10 @@ class TestEmbedderUnit:
     @pytest.mark.unit
     def test_init_loads_sentence_transformer_and_stores_batch_size(self, monkeypatch):
         """Embedder.__init__ loads SentenceTransformer and stores batch_size (lines 34-38)."""
-        import sentence_transformers
         from unittest.mock import MagicMock
+
+        import sentence_transformers
+
         from mcpvectordb.embedder import Embedder
 
         mock_model = MagicMock()
@@ -121,6 +125,7 @@ class TestEmbedderUnit:
     def test_embed_documents_empty_list_returns_zero_shape_without_model_call(self):
         """embed_documents([]) returns (0, 768) float32 array without calling model (line 55)."""
         from unittest.mock import MagicMock
+
         from mcpvectordb.embedder import Embedder
 
         emb = object.__new__(Embedder)
@@ -129,7 +134,7 @@ class TestEmbedderUnit:
 
         result = emb.embed_documents([])
 
-        assert result.shape == (0, 768)
+        assert result.shape == (0, settings.embedding_dimension)
         assert result.dtype == np.float32
         emb._model.encode.assert_not_called()
 
@@ -137,6 +142,7 @@ class TestEmbedderUnit:
     def test_embed_documents_returns_float32_array(self):
         """embed_documents returns float32 array of shape (n, 768) on success (line 64)."""
         from unittest.mock import MagicMock
+
         from mcpvectordb.embedder import Embedder
 
         emb = object.__new__(Embedder)
@@ -154,6 +160,7 @@ class TestEmbedderUnit:
     def test_embed_query_returns_float32_vector(self):
         """embed_query returns float32 array of shape (768,) on success (lines 82-89)."""
         from unittest.mock import MagicMock
+
         from mcpvectordb.embedder import Embedder
 
         emb = object.__new__(Embedder)
@@ -171,6 +178,7 @@ class TestEmbedderUnit:
     def test_embed_query_raises_embedding_error_on_model_failure(self):
         """embed_query raises EmbeddingError when the model raises (lines 90-91)."""
         from unittest.mock import MagicMock
+
         from mcpvectordb.embedder import Embedder
         from mcpvectordb.exceptions import EmbeddingError
 
@@ -186,9 +194,11 @@ class TestEmbedderUnit:
     @pytest.mark.unit
     def test_get_embedder_creates_instance_when_none(self, monkeypatch):
         """get_embedder initialises a new Embedder when _instance is None (line 98)."""
-        import sentence_transformers
-        import mcpvectordb.embedder as embedder_mod
         from unittest.mock import MagicMock
+
+        import sentence_transformers
+
+        import mcpvectordb.embedder as embedder_mod
 
         monkeypatch.setattr(sentence_transformers, "SentenceTransformer", MagicMock())
         monkeypatch.setattr(embedder_mod, "_instance", None)

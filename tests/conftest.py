@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
+from mcpvectordb.config import settings
 from mcpvectordb.store import Store
 
 
@@ -23,15 +24,17 @@ def store(lancedb_dir: Path) -> Store:
 
 @pytest.fixture
 def mock_embedder(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
-    """Patch embedder._instance with a mock returning random 768d vectors.
+    """Patch embedder._instance with a mock returning random vectors.
 
-    Avoids loading the real 768d model in fast tests.
+    Vector size matches settings.embedding_dimension to avoid schema mismatches.
     """
     embedder = MagicMock()
     embedder.embed_documents.side_effect = lambda texts: np.random.rand(
-        len(texts), 768
+        len(texts), settings.embedding_dimension
     ).astype(np.float32)
-    embedder.embed_query.return_value = np.random.rand(768).astype(np.float32)
+    embedder.embed_query.return_value = np.random.rand(
+        settings.embedding_dimension
+    ).astype(np.float32)
     monkeypatch.setattr("mcpvectordb.embedder._instance", embedder)
     return embedder
 
