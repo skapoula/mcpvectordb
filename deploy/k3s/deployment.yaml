@@ -22,7 +22,7 @@ spec:
             - containerPort: 8000
           env:
             - name: MCP_TRANSPORT
-              value: "sse"
+              value: "streamable-http"
             - name: MCP_HOST
               value: "0.0.0.0"
             - name: MCP_PORT

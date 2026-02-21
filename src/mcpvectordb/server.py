@@ -3,14 +3,20 @@
 import json
 import logging
 import sys
+import tempfile
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from mcpvectordb.config import settings
+from mcpvectordb.converter import convert as _convert
 from mcpvectordb.embedder import get_embedder
 from mcpvectordb.exceptions import IngestionError, StoreError, UnsupportedFormatError
 from mcpvectordb.ingestor import ingest
+from mcpvectordb.ingestor import ingest_content as _ingest_content
 from mcpvectordb.store import Store
 
 # ── Logging setup ──────────────────────────────────────────────────────────────
@@ -27,7 +33,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("mcpvectordb")
+# When extra allowed hosts are configured (e.g. a tailscale/nginx hostname),
+# extend the default localhost allowlist so DNS rebinding protection still applies.
+_transport_security: TransportSecuritySettings | None = None
+if settings.allowed_hosts_list:
+    _transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"] + settings.allowed_hosts_list,
+        allowed_origins=["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"],
+    )
+
+mcp = FastMCP(
+    "mcpvectordb",
+    host=settings.mcp_host,
+    port=settings.mcp_port,
+    transport_security=_transport_security,
+)
 _store = Store()
 
 
@@ -102,6 +123,48 @@ async def ingest_url(
         return {"error": f"Ingestion failed: {e}", "status": "error"}
     except Exception as e:
         logger.exception("Unexpected error in ingest_url")
+        return {"error": f"Internal error: {e}", "status": "error"}
+
+
+# ── Tool: ingest_content ───────────────────────────────────────────────────────
+@mcp.tool()
+async def ingest_content(
+    content: str,
+    source: str,
+    library: str = "default",
+    metadata: dict | None = None,
+) -> dict:
+    """Ingest text content directly, without reading from the filesystem.
+
+    Use this when you have already extracted or read the text — for example,
+    when a user uploads a file to Claude Desktop that the server cannot access
+    on disk. Read the file content yourself and pass it here as a string.
+
+    Args:
+        content: The full text or Markdown to index.
+        source: A label identifying the origin (e.g. filename or URL). Used for
+            deduplication and display in search results.
+        library: Library (collection) name. Defaults to 'default'.
+        metadata: Optional key-value metadata to attach to the document.
+
+    Returns:
+        Dict with status, doc_id, source, library, chunk_count.
+    """
+    if not content or not content.strip():
+        return {"error": "content must not be empty", "status": "error"}
+    try:
+        result = await _ingest_content(
+            content=content,
+            source=source,
+            library=library,
+            metadata=metadata,
+            store=_store,
+        )
+        return result.model_dump()
+    except IngestionError as e:
+        return {"error": f"Ingestion failed: {e}", "status": "error"}
+    except Exception as e:
+        logger.exception("Unexpected error in ingest_content")
         return {"error": f"Internal error: {e}", "status": "error"}
 
 
@@ -277,6 +340,91 @@ async def get_document(doc_id: str) -> dict:
         return {"error": f"Internal error: {e}", "status": "error"}
 
 
+# ── HTTP upload endpoint ───────────────────────────────────────────────────────
+@mcp.custom_route("/upload", methods=["POST"])
+async def upload_handler(request: Request) -> JSONResponse:
+    """Accept multipart file upload and run the full ingest pipeline on the server.
+
+    Form fields:
+        file     — binary file to ingest (required)
+        library  — library name (optional, defaults to DEFAULT_LIBRARY)
+        metadata — JSON string of key-value pairs (optional)
+    """
+    try:
+        form = await request.form(max_part_size=settings.max_upload_bytes)
+    except Exception as e:
+        return JSONResponse(
+            {"status": "error", "error": f"Form parse failed: {e}"}, status_code=400
+        )
+
+    upload = form.get("file")
+    if upload is None or not hasattr(upload, "read"):
+        return JSONResponse(
+            {"status": "error", "error": "Missing required 'file' field"},
+            status_code=400,
+        )
+
+    filename = getattr(upload, "filename", None) or "upload"
+    suffix = Path(filename).suffix or ".bin"
+    library = str(form.get("library") or settings.default_library)
+
+    raw_meta = form.get("metadata")
+    try:
+        metadata = json.loads(raw_meta) if raw_meta else None
+    except ValueError:
+        return JSONResponse(
+            {"status": "error", "error": "'metadata' must be a valid JSON string"},
+            status_code=400,
+        )
+
+    raw_bytes = await upload.read()
+
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(raw_bytes)
+            tmp_path = Path(tmp.name)
+
+        # Convert bytes → Markdown on the server (full markitdown pipeline).
+        # Use asyncio.to_thread because _convert is a blocking call.
+        import asyncio
+
+        markdown = await asyncio.to_thread(_convert, tmp_path)
+    except UnsupportedFormatError as e:
+        return JSONResponse(
+            {"status": "error", "error": f"Unsupported format: {e}"}, status_code=422
+        )
+    except Exception as e:
+        logger.exception("Unexpected error converting upload")
+        return JSONResponse(
+            {"status": "error", "error": f"Conversion failed: {e}"}, status_code=500
+        )
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+
+    # Ingest the converted Markdown using the original filename as source so that
+    # dedup and the index label use the real name, not the temp path.
+    try:
+        result = await _ingest_content(
+            content=markdown,
+            source=filename,
+            library=library,
+            metadata=metadata,
+            store=_store,
+        )
+        return JSONResponse(result.model_dump())
+    except IngestionError as e:
+        return JSONResponse(
+            {"status": "error", "error": f"Ingestion failed: {e}"}, status_code=500
+        )
+    except Exception as e:
+        logger.exception("Unexpected error in upload_handler")
+        return JSONResponse(
+            {"status": "error", "error": f"Internal error: {e}"}, status_code=500
+        )
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 def main() -> None:
     """Start the MCP server with the configured transport."""
@@ -289,12 +437,28 @@ def main() -> None:
 
     if settings.mcp_transport == "stdio":
         mcp.run(transport="stdio")
+    elif settings.mcp_transport == "streamable-http":
+        import asyncio
+
+        import uvicorn
+
+        async def _serve() -> None:
+            app = mcp.streamable_http_app()
+            config = uvicorn.Config(
+                app,
+                host=settings.mcp_host,
+                port=settings.mcp_port,
+                log_level=settings.log_level.lower(),
+                # Accept forwarded requests from reverse proxies (tailscale serve,
+                # nginx, etc.) whose Host header differs from the bind address.
+                proxy_headers=True,
+                forwarded_allow_ips="*",
+            )
+            await uvicorn.Server(config).serve()
+
+        asyncio.run(_serve())
     else:
-        mcp.run(
-            transport="sse",
-            host=settings.mcp_host,
-            port=settings.mcp_port,
-        )
+        mcp.run(transport="sse")
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -55,6 +55,29 @@ Convert a local file and index it in the vector store.
 
 ---
 
+### `ingest_content`
+
+Index pre-extracted text content directly, without reading from the server filesystem.
+
+Use this when Claude Desktop has already read a file (e.g. a user upload) and the
+server cannot access that path on disk. Read or extract the text yourself and pass it
+as the `content` parameter.
+
+**Input schema:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `content` | `string` | Yes | — | Full text or Markdown to index |
+| `source` | `string` | Yes | — | Label for the origin (filename, URL, etc.) — used for dedup and display |
+| `library` | `string` | No | `"default"` | Library to index into |
+| `metadata` | `object \| null` | No | `null` | Arbitrary key-value metadata |
+
+**Output schema:** Same as `ingest_file`.
+
+**Dedup behaviour:** Same as `ingest_file` but keyed on `(source, library)`.
+
+---
+
 ### `ingest_url`
 
 Fetch an HTTP/HTTPS URL, convert its content, and index it.
@@ -236,3 +259,45 @@ Any tool may return an error response:
 
 Tools never let exceptions propagate to the MCP framework — all errors are returned
 as structured error responses.
+
+---
+
+## HTTP Endpoints
+
+### POST /upload
+
+Upload a file directly from any HTTP client. The server receives the raw bytes and
+runs the full parsing pipeline (markitdown → chunk → embed → store). Use this when
+the file is not accessible on the server filesystem — e.g. a file on a Windows host
+connecting to a containerised server via an HTTPS tunnel.
+
+**Request:** `multipart/form-data`
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `file` | binary | Yes | The file to ingest |
+| `library` | string | No | Library name (default: `"default"`) |
+| `metadata` | string | No | JSON object string, e.g. `{"author":"Alice"}` |
+
+**Response:** Same JSON schema as `ingest_file`.
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| 400 | Missing `file` field, form parse error, or invalid `metadata` JSON |
+| 422 | File extension not supported by markitdown |
+| 500 | Ingestion pipeline error |
+
+**curl:**
+```bash
+curl -X POST https://<host>/upload \
+  -F "file=@report.pdf" \
+  -F "library=research"
+```
+
+**PowerShell:**
+```powershell
+Invoke-RestMethod -Uri "https://<host>/upload" -Method Post `
+  -Form @{ file = Get-Item "C:\docs\report.pdf"; library = "research" }
+```

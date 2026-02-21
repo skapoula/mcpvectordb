@@ -40,6 +40,23 @@ class Settings(BaseSettings):
     chunk_overlap_tokens: int = 64
     chunk_min_tokens: int = 50
 
+    # Upload
+    max_upload_bytes: int = 50 * 1024 * 1024  # 50 MB; controls Starlette max_part_size
+
+    # Security — extra allowed Host headers for DNS rebinding protection.
+    # Comma-separated. Add your reverse-proxy / tunnel hostname when running behind
+    # tailscale serve, nginx, cloudflared, etc.
+    # e.g.  ALLOWED_HOSTS=pluto.tailbcd62a.ts.net
+    #        ALLOWED_HOSTS=host1.example.com,host2.example.com
+    # pydantic-settings would JSON-parse a list[str] field before any validator runs,
+    # so we store the raw string and split it ourselves.
+    allowed_hosts: str = ""
+
+    @property
+    def allowed_hosts_list(self) -> list[str]:
+        """Return allowed_hosts as a list, split on commas."""
+        return [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]
+
     # URL fetching
     http_timeout_seconds: float = 10.0
     http_user_agent: str = "mcpvectordb/1.0"

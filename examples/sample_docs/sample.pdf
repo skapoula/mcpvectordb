@@ -2,32 +2,72 @@
 1 0 obj
 << /Type /Catalog /Pages 2 0 R >>
 endobj
+
 2 0 obj
 << /Type /Pages /Kids [3 0 R] /Count 1 >>
 endobj
+
 3 0 obj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]
    /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
 endobj
+
 4 0 obj
-<< /Length 44 >>
+<< /Length 1565 >>
 stream
-BT /F1 12 Tf 100 700 Td (Sample Document) Tj ET
+BT
+/F1 12 Tf
+50 750 Td
+(Model Context Protocol: A Technical Overview) Tj
+0 -20 Td
+(The Model Context Protocol (MCP) is an open standard introduced by Anthropic in November 2024.) Tj
+0 -20 Td
+(It provides a universal interface for AI systems to integrate with external tools and data sources.) Tj
+0 -20 Td
+(MCP defines how language models communicate with applications through a structured protocol.) Tj
+0 -20 Td
+(The protocol supports three transport modes: stdio for local subprocess communication,) Tj
+0 -20 Td
+(SSE for server-sent events over HTTP, and streamable-http for bidirectional streaming.) Tj
+0 -20 Td
+(Each MCP server exposes tools that Claude Desktop can discover and invoke at runtime.) Tj
+0 -20 Td
+(Tools have typed input schemas, making them safe and predictable for automated use.) Tj
+0 -20 Td
+(LanceDB is used as the underlying vector store for semantic search capabilities.) Tj
+0 -20 Td
+(Documents are chunked into overlapping segments and embedded using sentence-transformers.) Tj
+0 -20 Td
+(The embedding model used is all-MiniLM-L6-v2 which produces 384-dimensional vectors.) Tj
+0 -20 Td
+(Semantic similarity is computed using cosine distance in the vector space.) Tj
+0 -20 Td
+(The system supports ingestion of PDF Word PowerPoint Excel HTML and image formats.) Tj
+0 -20 Td
+(MarkItDown is used to convert all these formats into plain Markdown text.) Tj
+0 -20 Td
+(Content deduplication is performed using SHA256 hashes of the source bytes.) Tj
+0 -20 Td
+(Multiple libraries allow organizing documents into separate searchable collections.) Tj
+ET
 endstream
 endobj
+
 5 0 obj
 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
 endobj
+
 xref
 0 6
-0000000000 65535 f 
-0000000009 00000 n 
-0000000058 00000 n 
-0000000115 00000 n 
-0000000266 00000 n 
-0000000360 00000 n 
+0000000000 65535 f
+0000000009 00000 n
+0000000058 00000 n
+0000000115 00000 n
+0000000266 00000 n
+0000001553 00000 n
+
 trailer
 << /Size 6 /Root 1 0 R >>
 startxref
-441
+1631
 %%EOF

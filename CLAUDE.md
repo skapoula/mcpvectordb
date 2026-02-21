@@ -170,6 +170,7 @@ the server version. Breaking changes require a new tool name, not a modified one
 |------|-------------|----------------|
 | `ingest_file` | Convert a local file and index it | `path: str`, `library: str = "default"`, `metadata: dict \| None` |
 | `ingest_url` | Fetch a URL, convert, and index it | `url: str`, `library: str = "default"`, `metadata: dict \| None` |
+| `ingest_content` | Index pre-extracted text directly (e.g. from a user upload) | `content: str`, `source: str`, `library: str = "default"`, `metadata: dict \| None` |
 | `search` | Semantic search over the index | `query: str`, `top_k: int = 5`, `library: str \| None = None`, `filter: dict \| None` |
 | `list_documents` | List indexed documents with metadata | `library: str \| None = None`, `limit: int = 20`, `offset: int = 0` |
 | `list_libraries` | List all libraries with document counts | _(no parameters)_ |
@@ -320,3 +321,4 @@ Extends global Do Not. Project-specific hard rules:
 @.claude/rules/code-style.md
 @.claude/rules/testing.md
 @.claude/rules/lancedb-best-practices.md
+@.claude/rues/repo-docs-best-practices.md
