@@ -1,0 +1,40 @@
+{
+  "_comment": [
+    "Claude Desktop config for running mcpvectordb as a Docker container in stdio mode.",
+    "",
+    "Prerequisites:",
+    "  1. Build the image:  podman build -t mcpvectordb:0.1.0 /path/to/mcpvectordb",
+    "     The ONNX embedding model is baked into the image at build time —",
+    "     no download happens at container startup.",
+    "  2. Create the LanceDB volume (one-time):",
+    "     podman volume create mcpvectordb_lancedb-data",
+    "     (or run `podman-compose up -d` once to create it automatically)",
+    "",
+    "Key Docker flags for stdio MCP transport:",
+    "  --rm   Remove the container when Claude Desktop exits (ephemeral).",
+    "  -i     Attach stdin so the MCP transport receives data. WITHOUT -i the",
+    "         transport receives EOF immediately and Claude Desktop gets no responses.",
+    "  No -t  A TTY adds carriage returns (\\r\\n) that corrupt MCP framing.",
+    "",
+    "Container env vars are passed as --env KEY=VALUE inside 'args'.",
+    "The outer 'env' dict sets env vars for the 'docker' binary itself, not the container.",
+    "",
+    "Replace /path/to/host/docs with the directory you want to ingest files from.",
+    "Pass container-internal paths (/data/docs/...) when calling ingest_file."
+  ],
+  "mcpServers": {
+    "mcpvectordb": {
+      "command": "podman",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "--env", "MCP_TRANSPORT=stdio",
+        "--volume", "mcpvectordb_lancedb-data:/data/lancedb",
+        "--volume", "/path/to/host/docs:/data/docs:ro",
+        "mcpvectordb:0.1.0"
+      ],
+      "env": {}
+    }
+  }
+}
