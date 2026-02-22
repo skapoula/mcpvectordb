@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from starlette.testclient import TestClient
 
 from mcpvectordb.config import settings
 
@@ -171,6 +172,148 @@ class TestIngestUrlTool:
 
         assert result["status"] == "error"
         assert "Internal error" in result["error"]
+
+
+class TestIngestContentTool:
+    """Tests for the ingest_content MCP tool handler."""
+
+    @pytest.mark.unit
+    def test_returns_indexed_on_new_content(self, monkeypatch):
+        """ingest_content returns status='indexed' with doc_id and chunk_count on new content."""
+        from mcpvectordb import server
+        from mcpvectordb.ingestor import IngestResult
+
+        async def _fake(content, source, library, metadata, store):
+            return IngestResult(
+                status="indexed",
+                doc_id="content-doc-id",
+                source=source,
+                library=library,
+                chunk_count=3,
+            )
+
+        monkeypatch.setattr("mcpvectordb.server._ingest_content", _fake)
+        result = run(server.ingest_content(content="Hello world", source="test.txt"))
+
+        assert result["status"] == "indexed"
+        assert result["doc_id"] == "content-doc-id"
+        assert result["chunk_count"] == 3
+
+    @pytest.mark.unit
+    def test_returns_skipped_for_duplicate(self, monkeypatch):
+        """ingest_content returns status='skipped' and chunk_count=0 for duplicate content."""
+        from mcpvectordb import server
+        from mcpvectordb.ingestor import IngestResult
+
+        async def _fake(content, source, library, metadata, store):
+            return IngestResult(
+                status="skipped",
+                doc_id="existing-doc-id",
+                source=source,
+                library=library,
+                chunk_count=0,
+            )
+
+        monkeypatch.setattr("mcpvectordb.server._ingest_content", _fake)
+        result = run(server.ingest_content(content="Hello world", source="test.txt"))
+
+        assert result["status"] == "skipped"
+        assert result["chunk_count"] == 0
+
+    @pytest.mark.unit
+    def test_returns_replaced_for_updated_content(self, monkeypatch):
+        """ingest_content returns status='replaced' when content hash has changed."""
+        from mcpvectordb import server
+        from mcpvectordb.ingestor import IngestResult
+
+        async def _fake(content, source, library, metadata, store):
+            return IngestResult(
+                status="replaced",
+                doc_id="new-doc-id",
+                source=source,
+                library=library,
+                chunk_count=2,
+            )
+
+        monkeypatch.setattr("mcpvectordb.server._ingest_content", _fake)
+        result = run(server.ingest_content(content="Updated content", source="test.txt"))
+
+        assert result["status"] == "replaced"
+        assert "doc_id" in result
+
+    @pytest.mark.unit
+    def test_empty_content_returns_error(self):
+        """Empty or whitespace-only content returns an error dict without calling _ingest_content."""
+        from mcpvectordb import server
+
+        result_empty = run(server.ingest_content(content="", source="test.txt"))
+        assert result_empty["status"] == "error"
+        assert "error" in result_empty
+
+        result_whitespace = run(server.ingest_content(content="   ", source="test.txt"))
+        assert result_whitespace["status"] == "error"
+        assert "error" in result_whitespace
+
+    @pytest.mark.unit
+    def test_ingestion_error_returns_error_dict(self, monkeypatch):
+        """IngestionError from _ingest_content returns a structured error dict."""
+        from mcpvectordb import server
+        from mcpvectordb.exceptions import IngestionError
+
+        async def _raise(*args, **kwargs):
+            raise IngestionError("pipeline failed")
+
+        monkeypatch.setattr("mcpvectordb.server._ingest_content", _raise)
+        result = run(server.ingest_content(content="Hello world", source="test.txt"))
+
+        assert result["status"] == "error"
+        assert "Ingestion failed" in result["error"]
+
+    @pytest.mark.unit
+    def test_unexpected_exception_returns_error_dict(self, monkeypatch):
+        """Unexpected exception from _ingest_content returns a structured error dict."""
+        from mcpvectordb import server
+
+        async def _raise(*args, **kwargs):
+            raise RuntimeError("unexpected crash")
+
+        monkeypatch.setattr("mcpvectordb.server._ingest_content", _raise)
+        result = run(server.ingest_content(content="Hello world", source="test.txt"))
+
+        assert result["status"] == "error"
+        assert "Internal error" in result["error"]
+
+    @pytest.mark.unit
+    def test_library_and_metadata_forwarded(self, monkeypatch):
+        """ingest_content forwards library and metadata arguments to _ingest_content."""
+        from mcpvectordb import server
+        from mcpvectordb.ingestor import IngestResult
+
+        captured: dict = {}
+
+        async def _spy(content, source, library, metadata, store):
+            captured["library"] = library
+            captured["metadata"] = metadata
+            return IngestResult(
+                status="indexed",
+                doc_id="spy-doc-id",
+                source=source,
+                library=library,
+                chunk_count=1,
+            )
+
+        monkeypatch.setattr("mcpvectordb.server._ingest_content", _spy)
+        run(
+            server.ingest_content(
+                content="Hello world",
+                source="test.txt",
+                library="mylib",
+                metadata={"author": "tester"},
+            )
+        )
+
+        assert captured["library"] == "mylib"
+        assert captured["metadata"] == {"author": "tester"}
 
 
 class TestSearchTool:
@@ -512,3 +655,131 @@ class TestMainFunction:
         server_mod.main()
 
         mock_run.assert_called_once_with(transport="sse")
+
+
+@pytest.fixture
+def upload_client(monkeypatch):
+    """TestClient with _ingest_content and _convert patched for upload endpoint tests."""
+    from mcpvectordb import server
+    from mcpvectordb.ingestor import IngestResult
+
+    async def _fake_ingest_content(content, source, library, metadata, store):
+        return IngestResult(
+            status="indexed",
+            doc_id="upload-doc-id",
+            source=source,
+            library=library,
+            chunk_count=2,
+        )
+
+    monkeypatch.setattr("mcpvectordb.server._ingest_content", _fake_ingest_content)
+    monkeypatch.setattr("mcpvectordb.server._convert", lambda path: "# Converted")
+    return TestClient(server.mcp.sse_app(), raise_server_exceptions=False)
+
+
+class TestUploadEndpoint:
+    """Tests for the POST /upload HTTP endpoint."""
+
+    @pytest.mark.unit
+    def test_upload_success_returns_indexed(self, upload_client):
+        """Successful upload returns 200 with status='indexed' and doc_id."""
+        response = upload_client.post(
+            "/upload",
+            files={"file": ("test.txt", b"hello world", "text/plain")},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "indexed"
+        assert "doc_id" in body
+
+    @pytest.mark.unit
+    def test_upload_missing_file_field_returns_400(self, upload_client):
+        """POST with no file field returns 400 with 'Missing' in the error message."""
+        response = upload_client.post("/upload", data={"library": "default"})
+        assert response.status_code == 400
+        assert "Missing" in response.json()["error"]
+
+    @pytest.mark.unit
+    def test_upload_invalid_metadata_json_returns_400(self, upload_client):
+        """POST with non-JSON metadata field returns 400 with 'metadata' in the error."""
+        response = upload_client.post(
+            "/upload",
+            files={"file": ("test.txt", b"hello", "text/plain")},
+            data={"metadata": "not-json"},
+        )
+        assert response.status_code == 400
+        assert "metadata" in response.json()["error"]
+
+    @pytest.mark.unit
+    def test_upload_unsupported_format_returns_422(self, monkeypatch, upload_client):
+        """_convert raising UnsupportedFormatError returns 422 with 'Unsupported' in error."""
+        from mcpvectordb.exceptions import UnsupportedFormatError
+
+        monkeypatch.setattr(
+            "mcpvectordb.server._convert",
+            lambda path: (_ for _ in ()).throw(UnsupportedFormatError(".xyz")),
+        )
+        response = upload_client.post(
+            "/upload",
+            files={"file": ("file.xyz", b"data", "application/octet-stream")},
+        )
+        assert response.status_code == 422
+        assert "Unsupported" in response.json()["error"]
+
+    @pytest.mark.unit
+    def test_upload_library_and_metadata_forwarded(self, monkeypatch, upload_client):
+        """Upload correctly forwards library and metadata to _ingest_content."""
+        from mcpvectordb.ingestor import IngestResult
+
+        captured: dict = {}
+
+        async def _spy(content, source, library, metadata, store):
+            captured["library"] = library
+            captured["metadata"] = metadata
+            return IngestResult(
+                status="indexed",
+                doc_id="spy-id",
+                source=source,
+                library=library,
+                chunk_count=1,
+            )
+
+        monkeypatch.setattr("mcpvectordb.server._ingest_content", _spy)
+        upload_client.post(
+            "/upload",
+            files={"file": ("report.txt", b"content", "text/plain")},
+            data={"library": "research", "metadata": '{"author": "tester"}'},
+        )
+
+        assert captured["library"] == "research"
+        assert captured["metadata"] == {"author": "tester"}
+
+    @pytest.mark.unit
+    def test_upload_ingestion_error_returns_500(self, monkeypatch, upload_client):
+        """IngestionError from _ingest_content returns 500 with 'Ingestion failed' in error."""
+        from mcpvectordb.exceptions import IngestionError
+
+        async def _raise(*args, **kwargs):
+            raise IngestionError("store unavailable")
+
+        monkeypatch.setattr("mcpvectordb.server._ingest_content", _raise)
+        response = upload_client.post(
+            "/upload",
+            files={"file": ("test.txt", b"hello", "text/plain")},
+        )
+        assert response.status_code == 500
+        assert "Ingestion failed" in response.json()["error"]
+
+    @pytest.mark.unit
+    def test_upload_conversion_error_returns_500(self, monkeypatch, upload_client):
+        """RuntimeError from _convert returns 500 with 'Conversion failed' in error."""
+        monkeypatch.setattr(
+            "mcpvectordb.server._convert",
+            lambda path: (_ for _ in ()).throw(RuntimeError("codec crash")),
+        )
+        response = upload_client.post(
+            "/upload",
+            files={"file": ("doc.pdf", b"%PDF", "application/pdf")},
+        )
+        assert response.status_code == 500
+        assert "Conversion failed" in response.json()["error"]

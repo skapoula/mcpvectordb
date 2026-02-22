@@ -196,11 +196,11 @@ class TestEmbedderUnit:
         """get_embedder initialises a new Embedder when _instance is None (line 98)."""
         from unittest.mock import MagicMock
 
-        import sentence_transformers
+        import fastembed
 
         import mcpvectordb.embedder as embedder_mod
 
-        monkeypatch.setattr(sentence_transformers, "SentenceTransformer", MagicMock())
+        monkeypatch.setattr(fastembed, "TextEmbedding", MagicMock())
         monkeypatch.setattr(embedder_mod, "_instance", None)
 
         result = embedder_mod.get_embedder()
