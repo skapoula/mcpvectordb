@@ -1,45 +1,79 @@
+# docker-compose.yml — mcpvectordb unified deployment
+#
+# SELECT ONE MODE — comment out the active block, uncomment the desired one.
+# Only one mode may be active at a time (Docker Compose rejects duplicate keys).
+#
+# ┌─────────────────────────────────────────────────────────────────────────────┐
+# │  MODE A — Local container, loopback-only  [DEFAULT — ACTIVE]               │
+# │  Claude Desktop:  { "url": "http://localhost:${MCP_PORT:-8000}/mcp" }      │
+# ├─────────────────────────────────────────────────────────────────────────────┤
+# │  MODE B — LAN HTTP (no HTTPS)                                               │
+# │  Set in .env:  ALLOWED_HOSTS=<your-server-LAN-IP>:*                         │
+# │  Claude Desktop:  { "url": "http://<LAN_IP>:${MCP_PORT:-8000}/mcp" }       │
+# ├─────────────────────────────────────────────────────────────────────────────┤
+# │  MODE C — Tailscale HTTPS (recommended for remote access)                   │
+# │  Run once:  tailscale serve --bg https / http://127.0.0.1:8000             │
+# │  Set in .env:  ALLOWED_HOSTS=<your-tailscale-hostname>                      │
+# │  Claude Desktop:  { "url": "https://<tailscale-hostname>/mcp" }            │
+# ├─────────────────────────────────────────────────────────────────────────────┤
+# │  MODE D — Native TLS (cert + key required)                                  │
+# │  mkdir -p certs && openssl req -x509 -nodes -newkey rsa:2048 \             │
+# │    -keyout certs/key.pem -out certs/cert.pem -days 365 -subj '/CN=<host>'  │
+# │  Claude Desktop:  { "url": "https://<host>:${MCP_PORT:-8443}/mcp" }        │
+# └─────────────────────────────────────────────────────────────────────────────┘
+
 services:
   mcpvectordb:
     image: mcpvectordb:0.1.0
     build:
       context: .
-      network: host
+      # Uncomment to build with audio (ffmpeg) and OCR (tesseract) support:
+      # args:
+      #   MEDIA_FORMATS: "true"
     restart: unless-stopped
-    # network_mode: host bypasses rootlessport (Podman's rootless NAT layer),
-    # which silently drops traffic from external IPs. The container process
-    # binds directly to the host's 0.0.0.0:8000 — no port mapping needed.
-    network_mode: host
+
+    # ── NETWORK — pick ONE (network_mode: host and ports: cannot coexist) ────────
+
+    # MODE A — loopback-only (DEFAULT):
+    ports:
+      - "127.0.0.1:${MCP_PORT:-8000}:${MCP_PORT:-8000}"
+
+    # MODE B / MODE C — LAN or Tailscale, Linux (comment out MODE A ports above):
+    # network_mode: host
+
+    # MODE B / MODE C — LAN or Tailscale, macOS / Windows (comment out MODE A ports):
+    # ports:
+    #   - "0.0.0.0:${MCP_PORT:-8000}:${MCP_PORT:-8000}"
+
+    # MODE D — Native TLS (comment out MODE A ports above):
+    # ports:
+    #   - "0.0.0.0:${MCP_PORT:-8443}:${MCP_PORT:-8443}"
+
+    # ─────────────────────────────────────────────────────────────────────────────
     env_file:
-      # Load user overrides from .env (copy from .env.example).
-      # required: false allows compose up to succeed even without a .env file.
       - path: .env
         required: false
+
     environment:
-      # These values are pinned for correct container operation and override
-      # any conflicting values loaded from env_file above.
       MCP_TRANSPORT: streamable-http
       MCP_HOST: "0.0.0.0"
-      MCP_PORT: "8000"
+      MCP_PORT: "${MCP_PORT:-8000}"
       LANCEDB_URI: /data/lancedb
       EMBEDDING_MODEL: nomic-ai/nomic-embed-text-v1.5
-      # ALLOWED_HOSTS — set this in .env (see .env.example for all formats).
-      # The Host header Claude Desktop sends must appear in this list or the
-      # server returns 421 Misdirected Request (DNS rebinding protection).
-      #   Direct LAN HTTP:        ALLOWED_HOSTS=10.0.1.4:*
-      #   tailscale serve HTTPS:  ALLOWED_HOSTS=myhostname.tailXXXXXX.ts.net
-      #   Both:                   ALLOWED_HOSTS=10.0.1.4:*,myhostname.tailXXXXXX.ts.net
-      # Reads ALLOWED_HOSTS from .env; falls back to empty (localhost-only) if unset.
-      ALLOWED_HOSTS: "${ALLOWED_HOSTS:-}"
+
+      # MODES B / C / D — uncomment and set in .env before starting:
+      # ALLOWED_HOSTS: "${ALLOWED_HOSTS:-}"
+
+      # MODE D — native TLS — also update MCP_PORT above to 8443 (or preferred port):
+      # TLS_ENABLED: "true"
+      # TLS_CERT_FILE: "/certs/cert.pem"
+      # TLS_KEY_FILE: "/certs/key.pem"
+
     volumes:
-      # Vector store — persists across container restarts and image rebuilds.
       - lancedb-data:/data/lancedb
-      # Source documents for ingest_file. Set DOCS_DIR in .env to your local
-      # documents directory; defaults to ./docs-inbox (created on first run).
-      # Pass the container-internal path (/data/docs/...) to ingest_file.
-      # Prefer POST /upload for HTTP-mode ingestion to avoid path resolution.
       - ${DOCS_DIR:-./docs-inbox}:/data/docs:ro
+      # MODE D only — mount your certs directory read-only:
+      # - ./certs:/certs:ro
 
 volumes:
-  # Docker-managed named volume. Survives `podman-compose down`.
-  # Remove with: podman-compose down -v  (destructive — deletes all indexed data)
   lancedb-data:

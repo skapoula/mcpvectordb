@@ -43,6 +43,8 @@ RUN FASTEMBED_CACHE_PATH=/opt/models python -c \
 # ── Volumes ───────────────────────────────────────────────────────────────────
 # /data/lancedb — vector store (Docker named volume or k3s PVC)
 # /data/docs    — source documents for ingest_file (bind-mount, read-only)
+# /certs        — read-only bind mount for TLS cert+key (Mode D / TLS_ENABLED=true only).
+#                 Mount with: -v ./certs:/certs:ro  or via compose Mode D volume block.
 # No model-cache volume — the ONNX model is baked into the image at /opt/models.
 VOLUME ["/data/lancedb", "/data/docs"]
 

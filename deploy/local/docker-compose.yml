@@ -1,3 +1,8 @@
+# SUPERSEDED — retained for reference only.
+# Use the project-root docker-compose.yml instead; Mode A (loopback-only) is
+# equivalent to this file and is the active default.
+# See root docker-compose.yml for all deployment mode instructions.
+
 services:
   mcpvectordb:
     image: mcpvectordb:0.1.0

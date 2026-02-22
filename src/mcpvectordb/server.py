@@ -37,10 +37,15 @@ logger = logging.getLogger(__name__)
 # extend the default localhost allowlist so DNS rebinding protection still applies.
 _transport_security: TransportSecuritySettings | None = None
 if settings.allowed_hosts_list:
+    _scheme = "https" if settings.tls_enabled else "http"
     _transport_security = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
         allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"] + settings.allowed_hosts_list,
-        allowed_origins=["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"],
+        allowed_origins=[
+            f"{_scheme}://127.0.0.1:*",
+            f"{_scheme}://localhost:*",
+            f"{_scheme}://[::1]:*",
+        ],
     )
 
 mcp = FastMCP(
@@ -425,9 +430,47 @@ async def upload_handler(request: Request) -> JSONResponse:
         )
 
 
+# ── TLS validation ────────────────────────────────────────────────────────────
+def _validate_tls_config() -> None:
+    """Raise ValueError or log a warning if TLS settings are inconsistent."""
+    if not settings.tls_enabled:
+        return
+    if settings.mcp_transport == "stdio":
+        logger.warning(
+            "TLS_ENABLED=true has no effect with MCP_TRANSPORT=stdio; "
+            "TLS only applies to streamable-http."
+        )
+        return
+    if settings.mcp_transport != "streamable-http":
+        logger.warning(
+            "TLS_ENABLED=true is not supported with MCP_TRANSPORT=%s; "
+            "use a reverse proxy for TLS with SSE transport.",
+            settings.mcp_transport,
+        )
+        return
+    missing = [
+        v
+        for v, val in (
+            ("TLS_CERT_FILE", settings.tls_cert_file),
+            ("TLS_KEY_FILE", settings.tls_key_file),
+        )
+        if not val
+    ]
+    if missing:
+        raise ValueError(f"TLS_ENABLED=true but missing: {', '.join(missing)}")
+    for label, path_str in (
+        ("TLS_CERT_FILE", settings.tls_cert_file),
+        ("TLS_KEY_FILE", settings.tls_key_file),
+    ):
+        p = Path(path_str).expanduser().resolve()  # type: ignore[arg-type]
+        if not p.exists():
+            raise ValueError(f"{label} not found: {p}")
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 def main() -> None:
     """Start the MCP server with the configured transport."""
+    _validate_tls_config()
     logger.info("mcpvectordb starting (transport=%s)", settings.mcp_transport)
 
     # Pre-warm embedder at startup to avoid first-call latency
@@ -444,6 +487,15 @@ def main() -> None:
 
         async def _serve() -> None:
             app = mcp.streamable_http_app()
+            ssl_certfile: str | None = None
+            ssl_keyfile: str | None = None
+            if settings.tls_enabled:
+                ssl_certfile = str(
+                    Path(settings.tls_cert_file).expanduser().resolve()  # type: ignore[arg-type]
+                )
+                ssl_keyfile = str(
+                    Path(settings.tls_key_file).expanduser().resolve()  # type: ignore[arg-type]
+                )
             config = uvicorn.Config(
                 app,
                 host=settings.mcp_host,
@@ -453,6 +505,8 @@ def main() -> None:
                 # nginx, etc.) whose Host header differs from the bind address.
                 proxy_headers=True,
                 forwarded_allow_ips="*",
+                ssl_certfile=ssl_certfile,
+                ssl_keyfile=ssl_keyfile,
             )
             await uvicorn.Server(config).serve()
 

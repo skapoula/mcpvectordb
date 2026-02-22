@@ -57,6 +57,13 @@ class Settings(BaseSettings):
         """Return allowed_hosts as a list, split on commas."""
         return [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]
 
+    # TLS — native termination for streamable-http transport only.
+    # Leave disabled (default) when using Tailscale or a reverse proxy for HTTPS.
+    # Both TLS_CERT_FILE and TLS_KEY_FILE must be set when TLS_ENABLED=true.
+    tls_enabled: bool = False
+    tls_cert_file: str | None = None
+    tls_key_file: str | None = None
+
     # URL fetching
     http_timeout_seconds: float = 10.0
     http_user_agent: str = "mcpvectordb/1.0"
