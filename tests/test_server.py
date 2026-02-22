@@ -500,7 +500,7 @@ class TestMainFunction:
 
     @pytest.mark.unit
     def test_main_runs_with_sse_transport(self, monkeypatch):
-        """main() calls mcp.run with SSE parameters when transport='sse' (lines 285-290)."""
+        """main() calls mcp.run with transport='sse' for the sse fallback branch."""
         import mcpvectordb.config as config_mod
         import mcpvectordb.server as server_mod
 
@@ -508,9 +508,7 @@ class TestMainFunction:
         monkeypatch.setattr(server_mod.mcp, "run", mock_run)
         monkeypatch.setattr("mcpvectordb.server.get_embedder", MagicMock())
         monkeypatch.setattr(config_mod.settings, "mcp_transport", "sse")
-        monkeypatch.setattr(config_mod.settings, "mcp_host", "0.0.0.0")
-        monkeypatch.setattr(config_mod.settings, "mcp_port", 9000)
 
         server_mod.main()
 
-        mock_run.assert_called_once_with(transport="sse", host="0.0.0.0", port=9000)
+        mock_run.assert_called_once_with(transport="sse")
