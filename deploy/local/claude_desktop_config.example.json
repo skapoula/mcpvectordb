@@ -1,0 +1,20 @@
+{
+  "_comment": [
+    "Claude Desktop config for mcpvectordb running as a local container (HTTP mode).",
+    "",
+    "The container must be running before Claude Desktop connects.",
+    "Start it: docker compose -f deploy/local/docker-compose.yml up -d",
+    "See deploy/local/README.md for full setup instructions.",
+    "",
+    "The 'url' key uses Claude Desktop's native streamable-http transport.",
+    "No ALLOWED_HOSTS configuration needed: safe for loopback-only traffic.",
+    "",
+    "If you changed MCP_PORT in .env (e.g. to avoid a port conflict), update",
+    "the port number in the url below to match."
+  ],
+  "mcpServers": {
+    "mcpvectordb": {
+      "url": "http://localhost:8000/mcp"
+    }
+  }
+}
