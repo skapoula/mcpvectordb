@@ -9,6 +9,7 @@ MCP server for semantic search over a personal document library, usable from Cla
 | [User Guide](./user-guide.md) | End users | How to ingest documents and search them |
 | [Use Cases](./use-cases.md) | End users | Real examples: input → output |
 | [Installation](./installation.md) | Everyone | How to install and run the server |
+| [Local Container Setup](../deploy/local/README.md) | Everyone | Persistent local Docker/Podman container; Claude Desktop connects via localhost HTTP |
 | [API Reference](./api-reference.md) | Developers | MCP tool parameters and response shapes |
 | [Contributing](./contributing.md) | Developers | Dev setup, test commands, and PR workflow |
 

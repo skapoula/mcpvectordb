@@ -78,6 +78,51 @@ kubectl apply -f deploy/k3s/service.yaml
 }
 ```
 
+## Option C: Local Container HTTP (persistent, same machine)
+
+The container runs on the same machine as Claude Desktop and listens on
+`http://localhost:8000`. Claude Desktop connects via URL rather than spawning
+a subprocess. Data is stored in a Docker named volume and survives restarts.
+
+**Use this when:** you want a persistent server that stays running between Claude
+Desktop sessions, with better process isolation than Option A.
+
+**Requires:** Docker Desktop (macOS/Windows) or Docker Engine/Podman (Linux).
+
+1. Build the image (from the project root):
+
+```bash
+docker build -t mcpvectordb:0.1.0 .
+```
+
+2. Start the container:
+
+```bash
+docker compose -f deploy/local/docker-compose.yml up -d
+```
+
+3. Add the server to Claude Desktop's config:
+
+```json
+{
+  "mcpServers": {
+    "mcpvectordb": {
+      "url": "http://localhost:8000/mcp"
+    }
+  }
+}
+```
+
+Config file locations:
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+- Linux: `~/.config/Claude/claude_desktop_config.json`
+
+4. Restart Claude Desktop.
+
+For auto-start on boot and Linux Podman rootless setup, see
+[`deploy/local/README.md`](../deploy/local/README.md).
+
 ## Verify It's Working
 
 After restarting Claude Desktop, open a new conversation and ask:

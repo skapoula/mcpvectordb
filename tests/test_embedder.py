@@ -91,7 +91,7 @@ class TestEmbeddingError:
 
         emb = object.__new__(Embedder)
         model_mock = pytest.importorskip("unittest.mock").MagicMock()
-        model_mock.encode.side_effect = RuntimeError("GPU OOM")
+        model_mock.embed.side_effect = RuntimeError("GPU OOM")
         emb._model = model_mock
         emb._batch_size = 32
 
@@ -104,20 +104,20 @@ class TestEmbedderUnit:
 
     @pytest.mark.unit
     def test_init_loads_sentence_transformer_and_stores_batch_size(self, monkeypatch):
-        """Embedder.__init__ loads SentenceTransformer and stores batch_size (lines 34-38)."""
+        """Embedder.__init__ loads TextEmbedding and stores batch_size (lines 34-38)."""
         from unittest.mock import MagicMock
 
-        import sentence_transformers
+        import fastembed
 
         from mcpvectordb.embedder import Embedder
 
         mock_model = MagicMock()
-        mock_st_class = MagicMock(return_value=mock_model)
-        monkeypatch.setattr(sentence_transformers, "SentenceTransformer", mock_st_class)
+        mock_te_class = MagicMock(return_value=mock_model)
+        monkeypatch.setattr(fastembed, "TextEmbedding", mock_te_class)
 
         emb = Embedder("test-model", batch_size=16)
 
-        mock_st_class.assert_called_once_with("test-model", trust_remote_code=True)
+        mock_te_class.assert_called_once_with(model_name="test-model")
         assert emb._model is mock_model
         assert emb._batch_size == 16
 
@@ -147,7 +147,7 @@ class TestEmbedderUnit:
 
         emb = object.__new__(Embedder)
         mock_model = MagicMock()
-        mock_model.encode.return_value = np.random.rand(2, 768).astype(np.float32)
+        mock_model.embed.return_value = [np.random.rand(768).astype(np.float32) for _ in range(2)]
         emb._model = mock_model
         emb._batch_size = 32
 
@@ -165,7 +165,7 @@ class TestEmbedderUnit:
 
         emb = object.__new__(Embedder)
         mock_model = MagicMock()
-        mock_model.encode.return_value = np.random.rand(768).astype(np.float32)
+        mock_model.embed.return_value = [np.random.rand(768).astype(np.float32)]
         emb._model = mock_model
         emb._batch_size = 32
 

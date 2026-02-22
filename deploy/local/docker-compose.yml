@@ -1,0 +1,42 @@
+services:
+  mcpvectordb:
+    image: mcpvectordb:0.1.0
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # Bind only to the loopback interface on the host — not exposed to the LAN.
+    # Works on Docker Desktop (macOS/Windows) and Docker Engine (Linux).
+    # Does NOT use network_mode: host (Linux-only; incompatible with Docker Desktop).
+    ports:
+      - "127.0.0.1:${MCP_PORT:-8000}:${MCP_PORT:-8000}"
+    env_file:
+      # Load user overrides from project-root .env (copy from .env.example).
+      # required: false allows compose up to succeed without a .env file.
+      - path: ../../.env
+        required: false
+    environment:
+      # Pinned values — override any conflicting values loaded from env_file above.
+      # MCP_HOST must be 0.0.0.0 inside the container so Docker's port-mapping NAT
+      # can deliver traffic. The host-side 127.0.0.1: prefix restricts exposure.
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "${MCP_PORT:-8000}"
+      LANCEDB_URI: /data/lancedb
+      EMBEDDING_MODEL: nomic-ai/nomic-embed-text-v1.5
+      # ALLOWED_HOSTS is intentionally omitted. config.py defaults to "", which
+      # leaves allowed_hosts_list empty and disables Host-header validation.
+      # This is correct and safe for loopback-only (127.0.0.1) traffic.
+    volumes:
+      # Vector store — persists across container restarts and image rebuilds.
+      # Remove with: docker compose down -v  (destructive — deletes all indexed data)
+      - lancedb-data:/data/lancedb
+      # Source documents for ingest_file. Set DOCS_DIR to your local documents
+      # directory; defaults to ./docs-inbox (created automatically on first run).
+      # Pass the container-internal path (/data/docs/...) to ingest_file.
+      # Prefer POST /upload for HTTP-mode ingestion to avoid path resolution.
+      - ${DOCS_DIR:-./docs-inbox}:/data/docs:ro
+
+volumes:
+  # Docker-managed named volume. Survives `docker compose down`.
+  lancedb-data:

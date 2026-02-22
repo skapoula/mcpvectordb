@@ -1,0 +1,35 @@
+{
+  "_comment": [
+    "Claude Desktop config for mcpvectordb accessed over Tailscale HTTPS.",
+    "",
+    "Prerequisites on Fedora (run once):",
+    "  1. Start the container:  podman-compose up -d",
+    "  2. Get your Tailscale hostname:",
+    "       tailscale status --json | python3 -c \"import json,sys; d=json.load(sys.stdin); print(d['Self']['DNSName'].rstrip('.'))\"",
+    "     Example output:  fedora.tail1234abc.ts.net",
+    "  3. Set ALLOWED_HOSTS in .env (replace with your actual hostname):",
+    "       echo 'ALLOWED_HOSTS=fedora.tail1234abc.ts.net' >> .env",
+    "     Or for both LAN and Tailscale access:",
+    "       echo 'ALLOWED_HOSTS=10.0.1.4:*,fedora.tail1234abc.ts.net' >> .env",
+    "  4. Restart the container so it picks up the new ALLOWED_HOSTS:",
+    "       podman-compose up -d",
+    "  5. Start tailscale serve (HTTPS termination on port 443, forwarded to container on 8000):",
+    "       tailscale serve --bg https / http://127.0.0.1:8000",
+    "  6. Verify HTTPS works (from Fedora):",
+    "       curl https://fedora.tail1234abc.ts.net/",
+    "     Expected: HTTP 200 with an MCP JSON response.",
+    "",
+    "On Win11 Claude Desktop:",
+    "  Replace 'fedora.tail1234abc.ts.net' below with your actual Tailscale hostname.",
+    "  The 'url' key uses Claude Desktop's native streamable-http support — no npx needed.",
+    "  The /mcp path is where the FastMCP streamable-http transport listens.",
+    "",
+    "Stopping tailscale serve:",
+    "  tailscale serve --https=443 off"
+  ],
+  "mcpServers": {
+    "mcpvectordb": {
+      "url": "https://fedora.tail1234abc.ts.net/mcp"
+    }
+  }
+}

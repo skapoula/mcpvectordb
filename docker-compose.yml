@@ -1,0 +1,45 @@
+services:
+  mcpvectordb:
+    image: mcpvectordb:0.1.0
+    build:
+      context: .
+      network: host
+    restart: unless-stopped
+    # network_mode: host bypasses rootlessport (Podman's rootless NAT layer),
+    # which silently drops traffic from external IPs. The container process
+    # binds directly to the host's 0.0.0.0:8000 — no port mapping needed.
+    network_mode: host
+    env_file:
+      # Load user overrides from .env (copy from .env.example).
+      # required: false allows compose up to succeed even without a .env file.
+      - path: .env
+        required: false
+    environment:
+      # These values are pinned for correct container operation and override
+      # any conflicting values loaded from env_file above.
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "8000"
+      LANCEDB_URI: /data/lancedb
+      EMBEDDING_MODEL: nomic-ai/nomic-embed-text-v1.5
+      # ALLOWED_HOSTS — set this in .env (see .env.example for all formats).
+      # The Host header Claude Desktop sends must appear in this list or the
+      # server returns 421 Misdirected Request (DNS rebinding protection).
+      #   Direct LAN HTTP:        ALLOWED_HOSTS=10.0.1.4:*
+      #   tailscale serve HTTPS:  ALLOWED_HOSTS=myhostname.tailXXXXXX.ts.net
+      #   Both:                   ALLOWED_HOSTS=10.0.1.4:*,myhostname.tailXXXXXX.ts.net
+      # Reads ALLOWED_HOSTS from .env; falls back to empty (localhost-only) if unset.
+      ALLOWED_HOSTS: "${ALLOWED_HOSTS:-}"
+    volumes:
+      # Vector store — persists across container restarts and image rebuilds.
+      - lancedb-data:/data/lancedb
+      # Source documents for ingest_file. Set DOCS_DIR in .env to your local
+      # documents directory; defaults to ./docs-inbox (created on first run).
+      # Pass the container-internal path (/data/docs/...) to ingest_file.
+      # Prefer POST /upload for HTTP-mode ingestion to avoid path resolution.
+      - ${DOCS_DIR:-./docs-inbox}:/data/docs:ro
+
+volumes:
+  # Docker-managed named volume. Survives `podman-compose down`.
+  # Remove with: podman-compose down -v  (destructive — deletes all indexed data)
+  lancedb-data:
