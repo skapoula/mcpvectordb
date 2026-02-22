@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     default_library: str = "default"
 
     # Embedding
-    embedding_model: str = "nomic-embed-text-v1.5"
+    embedding_model: str = "nomic-ai/nomic-embed-text-v1.5"
     embedding_batch_size: int = 32
     # Must match EMBEDDING_MODEL output size; changing requires full re-index
     embedding_dimension: int = 768
