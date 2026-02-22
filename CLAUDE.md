@@ -23,7 +23,7 @@ Local files / URLs
 MarkItDown[all] ──► Markdown text
        │
        ▼
-Chunker + Embedder (sentence-transformers)
+Chunker + Embedder (fastembed)
        │
        ▼
 LanceDB  ◄──────────────────── configurable URI
@@ -46,7 +46,7 @@ uv add 'markitdown[all]'
 pip install 'markitdown[all]'
 ```
 
-**Key libraries:** `markitdown[all]` · `lancedb` · `mcp` · `sentence-transformers` ·
+**Key libraries:** `markitdown[all]` · `lancedb` · `mcp` · `fastembed` ·
 `httpx` · `pydantic` · `pydantic-settings` · `python-dotenv`
 
 ---
@@ -196,6 +196,9 @@ class ChunkRecord(BaseModel):
     chunk_index: int      # position of this chunk within its document
     created_at: str       # ISO 8601 timestamp
     metadata: str         # JSON-serialised dict of user-supplied key-value pairs
+    file_type: str        # e.g. "pdf", "docx", "html", "url"; "unknown" if undetectable
+    last_modified: str    # ISO 8601 from file mtime or HTTP Last-Modified; "" if unknown
+    page: int             # 1-indexed page number; 0 = not extracted / not applicable
 ```
 
 ---
