@@ -20,6 +20,7 @@ dependencies = [
 
 [project.scripts]
 mcpvectordb = "mcpvectordb.server:main"
+mcpvectordb-download-model = "mcpvectordb._download_model:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mcpvectordb"]
@@ -68,4 +69,5 @@ dev = [
     "ruff",
     "mypy",
     "bandit",
+    "pyinstaller>=6.0",
 ]

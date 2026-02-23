@@ -1,6 +1,27 @@
 """Runtime configuration loaded from environment variables via pydantic-settings."""
 
+import sys
+from pathlib import Path
+
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _default_data_dir() -> Path:
+    """Return the platform-appropriate user data directory for mcpvectordb."""
+    if sys.platform == "win32":
+        return Path.home() / "AppData" / "Local" / "mcpvectordb"
+    return Path.home() / ".mcpvectordb"
+
+
+def _default_lancedb_uri() -> str:
+    """Return the platform-appropriate default LanceDB URI."""
+    return str(_default_data_dir() / "lancedb")
+
+
+def _default_model_cache() -> str:
+    """Return the platform-appropriate default fastembed model cache path."""
+    return str(_default_data_dir() / "models")
 
 
 class Settings(BaseSettings):
@@ -21,7 +42,7 @@ class Settings(BaseSettings):
     mcp_port: int = 8000
 
     # LanceDB
-    lancedb_uri: str = "~/.mcpvectordb/lancedb"
+    lancedb_uri: str = Field(default_factory=_default_lancedb_uri)
     lancedb_table_name: str = "documents"
     default_library: str = "default"
 
@@ -30,6 +51,9 @@ class Settings(BaseSettings):
     embedding_batch_size: int = 32
     # Must match EMBEDDING_MODEL output size; changing requires full re-index
     embedding_dimension: int = 768
+    # fastembed model cache — set before the first TextEmbedding() call.
+    # Defaults to <data_dir>/models; override via FASTEMBED_CACHE_PATH env var.
+    fastembed_cache_path: str | None = Field(default_factory=_default_model_cache)
 
     # Search
     hybrid_search_enabled: bool = True  # BM25 + vector; disable for pure vector mode

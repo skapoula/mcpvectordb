@@ -1,6 +1,7 @@
 """Tests for server.py — MCP tool handler contracts, validation, error responses."""
 
 import asyncio
+import sys
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -122,6 +123,35 @@ class TestIngestFileTool:
 
         assert result["status"] == "error"
         assert "Internal error" in result["error"]
+
+    @pytest.mark.unit
+    def test_ingest_file_tilde_path_is_expanded(self, monkeypatch):
+        """ingest_file with a ~/... path calls ingest with an expanded absolute path."""
+        from pathlib import Path
+
+        from mcpvectordb import server
+        from mcpvectordb.ingestor import IngestResult
+
+        captured: dict = {}
+
+        async def _spy(source, library, metadata, store):
+            captured["source"] = source
+            return IngestResult(
+                status="indexed",
+                doc_id="tilde-doc",
+                source=str(source),
+                library=library,
+                chunk_count=1,
+            )
+
+        monkeypatch.setattr("mcpvectordb.server.ingest", _spy)
+        run(server.ingest_file(path="~/docs/report.pdf"))
+
+        source = captured["source"]
+        assert isinstance(source, Path)
+        # The tilde must have been expanded — the resolved path is absolute
+        assert source.is_absolute()
+        assert "~" not in str(source)
 
 
 class TestIngestUrlTool:
@@ -805,6 +835,61 @@ class TestValidateOAuthConfig:
             "test.apps.googleusercontent.com",
         )
         _validate_oauth_config()  # should not raise
+
+
+class TestFrozenBundleContext:
+    """Tests for PyInstaller frozen-bundle detection in main()."""
+
+    @pytest.mark.unit
+    def test_frozen_sets_fastembed_cache_env_var(self, tmp_path, monkeypatch):
+        """When sys.frozen is True, main() sets FASTEMBED_CACHE_PATH to bundled cache."""
+        import os
+
+        import mcpvectordb.config as config_mod
+        import mcpvectordb.server as server_mod
+
+        # Simulate a PyInstaller frozen environment
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+        # Ensure env var is not already set
+        monkeypatch.delenv("FASTEMBED_CACHE_PATH", raising=False)
+        monkeypatch.setattr(config_mod.settings, "mcp_transport", "stdio")
+        monkeypatch.setattr(server_mod.mcp, "run", MagicMock())
+        monkeypatch.setattr("mcpvectordb.server.get_embedder", MagicMock())
+        # lancedb_uri must be a real writable path so mkdir() succeeds
+        monkeypatch.setattr(
+            config_mod.settings, "lancedb_uri", str(tmp_path / "lancedb")
+        )
+        monkeypatch.setattr(config_mod.settings, "fastembed_cache_path", None)
+
+        server_mod.main()
+
+        expected = str(tmp_path / "fastembed_cache")
+        assert os.environ.get("FASTEMBED_CACHE_PATH") == expected
+
+    @pytest.mark.unit
+    def test_frozen_respects_explicit_env_var(self, tmp_path, monkeypatch):
+        """When FASTEMBED_CACHE_PATH is already set, frozen detection does not override it."""
+        import mcpvectordb.config as config_mod
+        import mcpvectordb.server as server_mod
+
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+        explicit = str(tmp_path / "my_custom_models")
+        monkeypatch.setenv("FASTEMBED_CACHE_PATH", explicit)
+        monkeypatch.setattr(config_mod.settings, "mcp_transport", "stdio")
+        monkeypatch.setattr(server_mod.mcp, "run", MagicMock())
+        monkeypatch.setattr("mcpvectordb.server.get_embedder", MagicMock())
+        monkeypatch.setattr(
+            config_mod.settings, "lancedb_uri", str(tmp_path / "lancedb")
+        )
+        monkeypatch.setattr(config_mod.settings, "fastembed_cache_path", None)
+
+        server_mod.main()
+
+        import os
+
+        assert os.environ.get("FASTEMBED_CACHE_PATH") == explicit
 
 
 class TestMainFunction:
