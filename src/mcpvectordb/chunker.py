@@ -11,27 +11,53 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _tokenizer: "PreTrainedTokenizerBase | None" = None
+_tokenizer_failed: bool = False
 
 # Separator hierarchy for recursive splitting
 _SEPARATORS = ["\n\n", "\n", " ", ""]
 
+# The HuggingFace Hub model ID for the tokenizer.
+# settings.embedding_model is the fastembed short name ("nomic-embed-text-v1.5");
+# the HuggingFace Hub requires the full org-prefixed ID.
+_HF_TOKENIZER_ID = "nomic-ai/nomic-embed-text-v1.5"
 
-def _get_tokenizer() -> "PreTrainedTokenizerBase":
-    """Return the module-level tokenizer singleton, initialising on first call."""
-    global _tokenizer  # noqa: PLW0603
-    if _tokenizer is None:
-        from transformers import AutoTokenizer
 
-        logger.info("Loading tokenizer for model %s", settings.embedding_model)
-        _tokenizer = AutoTokenizer.from_pretrained(  # nosec B615 — from trusted config
-            settings.embedding_model
-        )
+def _get_tokenizer() -> "PreTrainedTokenizerBase | None":
+    """Return the tokenizer singleton, or None if it cannot be loaded.
+
+    Falls back gracefully so chunking still works when the HuggingFace cache
+    is empty and the network is unavailable (e.g. air-gapped Windows machines).
+    Run 'uv run mcpvectordb-download-model' once to pre-populate the cache.
+    """
+    global _tokenizer, _tokenizer_failed  # noqa: PLW0603
+    if _tokenizer is None and not _tokenizer_failed:
+        try:
+            from transformers import AutoTokenizer
+
+            logger.info("Loading tokenizer %s", _HF_TOKENIZER_ID)
+            _tokenizer = AutoTokenizer.from_pretrained(  # nosec B615
+                _HF_TOKENIZER_ID
+            )
+        except Exception as exc:
+            _tokenizer_failed = True
+            logger.warning(
+                "Tokenizer load failed (%s). "
+                "Run 'uv run mcpvectordb-download-model' to pre-download it. "
+                "Falling back to word-count approximation for chunking.",
+                exc,
+            )
     return _tokenizer
 
 
 def _token_length(text: str) -> int:
-    """Return the number of tokens in *text* using the embedding tokenizer."""
+    """Return the token count for *text*, using the exact tokenizer when available.
+
+    Falls back to a word-count approximation (~1.3 tokens/word) when the
+    tokenizer has not been downloaded yet.
+    """
     tok = _get_tokenizer()
+    if tok is None:
+        return max(1, int(len(text.split()) * 1.3))
     return len(tok.encode(text, add_special_tokens=False))
 
 
