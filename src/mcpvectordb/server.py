@@ -636,6 +636,15 @@ def main() -> None:
         _bundle = Path(getattr(sys, "_MEIPASS", ""))
         os.environ["FASTEMBED_CACHE_PATH"] = str(_bundle / "fastembed_cache")
 
+    # Disable HuggingFace tokenizer parallelism before any model code is imported.
+    # The Rust rayon thread pool inside `tokenizers` can deadlock when used inside
+    # asyncio.to_thread(); disabling it prevents that entirely.
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+    # Suppress the verbose "PyTorch not found" banner that transformers prints to
+    # stderr on every startup — it is expected (we only need tokenization, not
+    # inference) and would clutter Claude Desktop's server logs.
+    os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+
     _validate_tls_config()
     _validate_oauth_config()
     logger.info("mcpvectordb starting (transport=%s)", settings.mcp_transport)
@@ -649,10 +658,18 @@ def main() -> None:
         cache_path.mkdir(parents=True, exist_ok=True)
         os.environ["FASTEMBED_CACHE_PATH"] = str(cache_path)
 
-    # Pre-warm embedder at startup to avoid first-call latency
+    # Pre-warm both models at startup so the first ingest call is not delayed.
+    # Loading is done here (blocking, before the event loop starts) to avoid
+    # any interaction with asyncio.to_thread().
     logger.info("Pre-loading embedding model %s", settings.embedding_model)
     get_embedder()
-    logger.info("Embedding model loaded. Ready.")
+    logger.info("Embedding model loaded.")
+
+    from mcpvectordb.chunker import _get_tokenizer
+
+    logger.info("Pre-loading tokenizer %s", settings.embedding_model)
+    _get_tokenizer()
+    logger.info("Tokenizer loaded. Ready.")
 
     if settings.mcp_transport == "stdio":
         mcp.run(transport="stdio")
