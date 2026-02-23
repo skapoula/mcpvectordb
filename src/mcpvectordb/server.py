@@ -81,7 +81,7 @@ async def ingest_file(
     """
     try:
         result = await ingest(
-            source=Path(path).resolve(),
+            source=Path(path).expanduser().resolve(),
             library=library,
             metadata=metadata,
             store=_store,
@@ -554,9 +554,27 @@ def _validate_oauth_config() -> None:
 # ── Entry point ───────────────────────────────────────────────────────────────
 def main() -> None:
     """Start the MCP server with the configured transport."""
+    import os
+
+    # PyInstaller frozen bundle: use bundled model cache unless user overrides.
+    # sys.frozen is set by PyInstaller's bootloader; sys._MEIPASS is the
+    # temp directory where the bundle is extracted at runtime.
+    if getattr(sys, "frozen", False) and not os.environ.get("FASTEMBED_CACHE_PATH"):
+        _bundle = Path(getattr(sys, "_MEIPASS", ""))
+        os.environ["FASTEMBED_CACHE_PATH"] = str(_bundle / "fastembed_cache")
+
     _validate_tls_config()
     _validate_oauth_config()
     logger.info("mcpvectordb starting (transport=%s)", settings.mcp_transport)
+
+    # Ensure runtime data directories exist before any I/O
+    Path(settings.lancedb_uri).expanduser().mkdir(parents=True, exist_ok=True)
+    if settings.log_file:
+        Path(settings.log_file).expanduser().parent.mkdir(parents=True, exist_ok=True)
+    if settings.fastembed_cache_path:
+        cache_path = Path(settings.fastembed_cache_path).expanduser()
+        cache_path.mkdir(parents=True, exist_ok=True)
+        os.environ["FASTEMBED_CACHE_PATH"] = str(cache_path)
 
     # Pre-warm embedder at startup to avoid first-call latency
     logger.info("Pre-loading embedding model %s", settings.embedding_model)
