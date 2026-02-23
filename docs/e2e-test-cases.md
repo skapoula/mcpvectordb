@@ -230,6 +230,22 @@ The server must be running and connected before starting (confirm with TC-01).
 
 ---
 
+## TC-15b · Scanned / image-based PDF
+
+**Purpose:** Verify a PDF with no extractable text returns a clear, actionable error — not a generic "chunking failed" message.
+
+**Pre-condition:** Have a scanned PDF (image-only, no text layer) at a known path.
+
+**Prompt:**
+> Index the file C:\Users\you\Documents\scanned.pdf
+
+**Pass criteria:**
+- Returns `status: error` with a message indicating no text could be extracted
+- Message suggests using `ingest_content` to pass the text directly
+- No mention of "chunking failed"; no crash; server still responsive
+
+---
+
 ## TC-16 · Non-existent file
 
 **Purpose:** Verify a missing file path returns a useful error.
