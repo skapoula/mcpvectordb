@@ -623,6 +623,190 @@ class TestGetDocumentTool:
         assert "Internal error" in result["error"]
 
 
+class TestOAuthProtectedResourceMetadata:
+    """Tests for the /.well-known/oauth-protected-resource endpoint."""
+
+    @pytest.fixture
+    def sse_client(self, monkeypatch):
+        """TestClient backed by the SSE app (includes custom routes)."""
+        from mcpvectordb import server
+
+        return TestClient(server.mcp.sse_app(), raise_server_exceptions=False)
+
+    @pytest.mark.unit
+    def test_prm_endpoint_returns_200(self, sse_client):
+        """GET /.well-known/oauth-protected-resource returns 200."""
+        response = sse_client.get("/.well-known/oauth-protected-resource")
+        assert response.status_code == 200
+
+    @pytest.mark.unit
+    def test_prm_endpoint_returns_correct_shape(self, sse_client):
+        """PRM response contains required RFC 9728 fields."""
+        response = sse_client.get("/.well-known/oauth-protected-resource")
+        body = response.json()
+
+        assert "resource" in body
+        assert "authorization_servers" in body
+        assert "https://accounts.google.com" in body["authorization_servers"]
+        assert body["bearer_methods_supported"] == ["header"]
+
+    @pytest.mark.unit
+    def test_prm_accessible_without_auth(self, sse_client, monkeypatch):
+        """PRM endpoint returns 200 even when OAUTH_ENABLED=true and no Bearer token."""
+        import mcpvectordb.config as config_mod
+
+        monkeypatch.setattr(config_mod.settings, "oauth_enabled", True)
+        response = sse_client.get("/.well-known/oauth-protected-resource")
+        assert response.status_code == 200
+
+    @pytest.mark.unit
+    def test_prm_resource_url_uses_setting(self, sse_client, monkeypatch):
+        """When OAUTH_RESOURCE_URL is set, it appears in the response."""
+        import mcpvectordb.config as config_mod
+
+        monkeypatch.setattr(
+            config_mod.settings, "oauth_resource_url", "https://mcp.example.com"
+        )
+        response = sse_client.get("/.well-known/oauth-protected-resource")
+        assert response.json()["resource"] == "https://mcp.example.com"
+
+
+class TestRequireGoogleAuth:
+    """Tests for the _RequireGoogleAuth ASGI middleware."""
+
+    @pytest.mark.unit
+    def test_returns_401_for_unauthenticated_request(self):
+        """Unauthenticated request to a non-well-known path gets 401."""
+        from mcpvectordb.server import _RequireGoogleAuth
+        from starlette.applications import Starlette
+        from starlette.requests import Request as StarletteRequest
+        from starlette.responses import PlainTextResponse
+        from starlette.routing import Route
+
+        def homepage(request: StarletteRequest):
+            return PlainTextResponse("ok")
+
+        inner_app = Starlette(routes=[Route("/mcp", homepage)])
+        app = _RequireGoogleAuth(inner_app)
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/mcp")
+        assert response.status_code == 401
+
+    @pytest.mark.unit
+    def test_well_known_passes_without_auth(self):
+        """/.well-known/* requests bypass the auth check."""
+        from mcpvectordb.server import _RequireGoogleAuth
+        from starlette.applications import Starlette
+        from starlette.requests import Request as StarletteRequest
+        from starlette.responses import PlainTextResponse
+        from starlette.routing import Route
+
+        def well_known(request: StarletteRequest):
+            return PlainTextResponse("metadata")
+
+        inner_app = Starlette(
+            routes=[Route("/.well-known/oauth-protected-resource", well_known)]
+        )
+        app = _RequireGoogleAuth(inner_app)
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/.well-known/oauth-protected-resource")
+        assert response.status_code == 200
+
+    @pytest.mark.unit
+    def test_authenticated_request_passes_through(self):
+        """Requests with is_authenticated=True on user are forwarded."""
+        from typing import Any as TypingAny
+
+        from mcpvectordb.server import _RequireGoogleAuth
+        from starlette.applications import Starlette
+        from starlette.authentication import SimpleUser
+        from starlette.requests import Request as StarletteRequest
+        from starlette.responses import PlainTextResponse
+        from starlette.routing import Route
+        from starlette.types import Receive, Scope, Send
+
+        class _AuthenticatedUser(SimpleUser):
+            is_authenticated = True
+
+        def homepage(request: StarletteRequest):
+            return PlainTextResponse("ok")
+
+        # Simulate AuthenticationMiddleware by setting scope["user"] before
+        # _RequireGoogleAuth runs. Wrap: _UserSetter → _RequireGoogleAuth → Starlette
+        class _UserSetter:
+            def __init__(self, app: TypingAny) -> None:
+                self.app = app
+
+            async def __call__(
+                self, scope: Scope, receive: Receive, send: Send
+            ) -> None:
+                scope["user"] = _AuthenticatedUser("tester")
+                await self.app(scope, receive, send)
+
+        inner_app = Starlette(routes=[Route("/protected", homepage)])
+        app = _UserSetter(_RequireGoogleAuth(inner_app))
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/protected")
+        assert response.status_code == 200
+
+
+class TestValidateOAuthConfig:
+    """Tests for _validate_oauth_config()."""
+
+    @pytest.mark.unit
+    def test_disabled_oauth_passes(self, monkeypatch):
+        """_validate_oauth_config does nothing when OAUTH_ENABLED=false."""
+        import mcpvectordb.config as config_mod
+        from mcpvectordb.server import _validate_oauth_config
+
+        monkeypatch.setattr(config_mod.settings, "oauth_enabled", False)
+        _validate_oauth_config()  # should not raise
+
+    @pytest.mark.unit
+    def test_stdio_with_oauth_logs_warning(self, monkeypatch, caplog):
+        """OAUTH_ENABLED=true with stdio transport logs a warning and returns."""
+        import logging
+
+        import mcpvectordb.config as config_mod
+        from mcpvectordb.server import _validate_oauth_config
+
+        monkeypatch.setattr(config_mod.settings, "oauth_enabled", True)
+        monkeypatch.setattr(config_mod.settings, "mcp_transport", "stdio")
+
+        with caplog.at_level(logging.WARNING, logger="mcpvectordb.server"):
+            _validate_oauth_config()
+
+        assert any("no effect" in r.message for r in caplog.records)
+
+    @pytest.mark.unit
+    def test_missing_client_id_raises(self, monkeypatch):
+        """OAUTH_ENABLED=true without client_id raises ValueError."""
+        import mcpvectordb.config as config_mod
+        from mcpvectordb.server import _validate_oauth_config
+
+        monkeypatch.setattr(config_mod.settings, "oauth_enabled", True)
+        monkeypatch.setattr(config_mod.settings, "mcp_transport", "streamable-http")
+        monkeypatch.setattr(config_mod.settings, "oauth_client_id", None)
+
+        with pytest.raises(ValueError, match="OAUTH_CLIENT_ID"):
+            _validate_oauth_config()
+
+    @pytest.mark.unit
+    def test_valid_oauth_config_passes(self, monkeypatch):
+        """OAUTH_ENABLED=true with client_id and streamable-http passes without error."""
+        import mcpvectordb.config as config_mod
+        from mcpvectordb.server import _validate_oauth_config
+
+        monkeypatch.setattr(config_mod.settings, "oauth_enabled", True)
+        monkeypatch.setattr(config_mod.settings, "mcp_transport", "streamable-http")
+        monkeypatch.setattr(
+            config_mod.settings,
+            "oauth_client_id",
+            "test.apps.googleusercontent.com",
+        )
+        _validate_oauth_config()  # should not raise
+
+
 class TestMainFunction:
     """Tests for the main() entry point function."""
 

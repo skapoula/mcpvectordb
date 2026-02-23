@@ -64,6 +64,18 @@ class Settings(BaseSettings):
     tls_cert_file: str | None = None
     tls_key_file: str | None = None
 
+    # OAuth — Google Resource Server mode.
+    # Leave OAUTH_ENABLED=false for local stdio or trusted-network deployments.
+    oauth_enabled: bool = False
+    oauth_client_id: str | None = None  # Google OAuth 2.0 client_id
+    oauth_resource_url: str | None = None  # Public URL of this server
+    oauth_allowed_emails: str = ""  # Comma-separated; empty = any authenticated Google user
+
+    @property
+    def oauth_allowed_emails_list(self) -> list[str]:
+        """Return oauth_allowed_emails as a list, split on commas."""
+        return [e.strip() for e in self.oauth_allowed_emails.split(",") if e.strip()]
+
     # URL fetching
     http_timeout_seconds: float = 10.0
     http_user_agent: str = "mcpvectordb/1.0"
