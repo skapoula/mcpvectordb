@@ -41,7 +41,19 @@ def download_model() -> None:
 
     # Instantiating triggers the download if the model is not already cached.
     TextEmbedding(model_name=model_name)
-    print("Model ready.")
+    print("Embedding model ready.")
+
+    # Pre-download the HuggingFace tokenizer used by the chunker for token counting.
+    # Without this, the first ingest on a fresh machine falls back to word-count
+    # approximation (which works, but exact tokenization is better).
+    print("Downloading tokenizer (nomic-ai/nomic-embed-text-v1.5)…")
+    try:
+        from transformers import AutoTokenizer
+
+        AutoTokenizer.from_pretrained("nomic-ai/nomic-embed-text-v1.5")
+        print("Tokenizer ready.")
+    except Exception as exc:
+        print(f"Tokenizer download failed ({exc}). Chunking will use word-count approximation.")
 
 
 def main() -> None:
