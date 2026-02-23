@@ -39,28 +39,31 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 $uvVersion = (uv --version) -replace "uv ", ""
 Write-OK "uv $uvVersion found"
 
-# ── Step 2: Check Python 3.11+ ────────────────────────────────────────────────
+# ── Step 2: Ensure Python 3.13 is available ───────────────────────────────────
+# onnxruntime (required by fastembed) does not yet publish wheels for Python 3.14+.
+# We pin to 3.13 explicitly so uv never picks a newer system Python by accident.
 
-Write-Step "Checking for Python 3.11+..."
-$pythonOk = $false
+Write-Step "Ensuring Python 3.13 is available via uv..."
+$py313Ok = $false
 try {
     $pyOutput = uv python list 2>&1
-    if ($pyOutput -match "3\.(1[1-9]|[2-9]\d)") {
-        $pythonOk = $true
-        Write-OK "Python 3.11+ available via uv"
+    if ($pyOutput -match "3\.13") {
+        $py313Ok = $true
+        Write-OK "Python 3.13 already available"
     }
 } catch {}
 
-if (-not $pythonOk) {
-    Write-Warn "Python 3.11+ not found. Installing via uv..."
-    uv python install 3.11
-    Write-OK "Python 3.11 installed"
+if (-not $py313Ok) {
+    Write-Host "    Installing Python 3.13 via uv (one-time download)..." -ForegroundColor Yellow
+    uv python install 3.13
+    if ($LASTEXITCODE -ne 0) { Write-Fail "Failed to install Python 3.13" }
+    Write-OK "Python 3.13 installed"
 }
 
 # ── Step 3: Install Python dependencies ───────────────────────────────────────
 
-Write-Step "Installing Python dependencies (uv sync)..."
-uv sync
+Write-Step "Installing Python dependencies (uv sync --python 3.13)..."
+uv sync --python 3.13
 if ($LASTEXITCODE -ne 0) { Write-Fail "uv sync failed" }
 Write-OK "Dependencies installed"
 

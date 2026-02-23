@@ -8,7 +8,8 @@ Two deployment options: **Python + uv** (developer-friendly) or **standalone `.e
 ### Python + uv option
 - Windows 11 (x64)
 - [uv](https://docs.astral.sh/uv/) — Python package manager
-- Python 3.11 or later (installable via `uv python install 3.11`)
+- Python **3.11–3.13** — the setup script installs 3.13 automatically via uv
+  (Python 3.14+ is not yet supported: ONNX Runtime has no 3.14 wheel)
 - [Claude Desktop for Windows](https://claude.ai/download)
 - Visual C++ Redistributable 2019 or later — required by ONNX Runtime
   - Download: [aka.ms/vs/17/release/vc_redist.x64.exe](https://aka.ms/vs/17/release/vc_redist.x64.exe)
@@ -17,7 +18,7 @@ Two deployment options: **Python + uv** (developer-friendly) or **standalone `.e
 - Windows 11 (x64) — **no Python installation required on target machine**
 - Visual C++ Redistributable 2019 or later (same link above)
 - [Claude Desktop for Windows](https://claude.ai/download)
-- Build machine additionally needs: uv, Python 3.11+
+- Build machine additionally needs: uv (the build script handles Python 3.13)
 
 ---
 
@@ -156,6 +157,7 @@ All paths are overridable via `.env` or the `env` block in `claude_desktop_confi
 
 | Symptom | Fix |
 |---------|-----|
+| `onnxruntime` has no wheel for `cp314` | Python 3.14 is not yet supported; run `uv python install 3.13` then re-run the setup script |
 | `DLL load failed` or `VCRUNTIME140.dll not found` | Install [Visual C++ Redistributable 2019+](https://aka.ms/vs/17/release/vc_redist.x64.exe) and restart |
 | `uv: command not found` in PowerShell | Run `irm https://astral.sh/uv/install.ps1 \| iex`, then open a new terminal |
 | Claude Desktop shows no tools | Verify the JSON in `claude_desktop_config.json` is valid; check paths are correct |

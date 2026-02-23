@@ -48,8 +48,8 @@ Set-Location $ProjectDir
 
 # ── Step 1: Install all dependencies (including pyinstaller) ──────────────────
 
-Write-Step "Installing dependencies (uv sync --all-groups)…"
-uv sync --all-groups
+Write-Step "Installing dependencies (uv sync --python 3.13 --all-groups)…"
+uv sync --python 3.13 --all-groups
 if ($LASTEXITCODE -ne 0) { Write-Fail "uv sync failed" }
 Write-OK "Dependencies installed"
 
