@@ -390,28 +390,31 @@ async def server_info(check_path: str | None = None) -> dict:
 
     if check_path:
         resolved = Path(check_path).expanduser().resolve()
+        parent_exists = resolved.parent.exists()
+        base: dict[str, Any] = {
+            "received": check_path,        # raw string the server got
+            "resolved": str(resolved),     # after expanduser + resolve
+            "parent_exists": parent_exists,
+        }
         if resolved.exists():
             try:
                 size = resolved.stat().st_size
                 # Confirm read permission by opening briefly
                 with resolved.open("rb") as fh:
                     fh.read(1)
-                info["path_check"] = {
-                    "path": str(resolved),
-                    "readable": True,
-                    "size_bytes": size,
-                }
+                info["path_check"] = {**base, "readable": True, "size_bytes": size}
             except OSError as e:
-                info["path_check"] = {
-                    "path": str(resolved),
-                    "readable": False,
-                    "error": str(e),
-                }
+                info["path_check"] = {**base, "readable": False, "error": str(e)}
         else:
             info["path_check"] = {
-                "path": str(resolved),
+                **base,
                 "readable": False,
-                "error": "File does not exist",
+                "error": (
+                    "File does not exist at resolved path. "
+                    "Check 'received' to see exactly what the server got — "
+                    "special characters like & may have been truncated by "
+                    "the AI layer. If so, rename the file to remove them."
+                ),
             }
 
     return info
