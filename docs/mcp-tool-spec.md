@@ -249,6 +249,41 @@ Return the full Markdown text of an indexed document.
 
 ---
 
+### `server_info`
+
+Return server diagnostics. Use this to verify the installation and check whether
+the server can read a specific file path before attempting ingestion.
+
+**Input schema:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `check_path` | `string \| null` | No | `null` | File path to test for readability |
+
+**Output schema:**
+
+```json
+{
+  "platform": "win32",
+  "python_version": "3.13.1",
+  "cwd": "C:\\Users\\you\\mcpvectordb",
+  "lancedb_uri": "C:\\Users\\you\\AppData\\Local\\mcpvectordb\\lancedb",
+  "fastembed_cache_path": "C:\\Users\\you\\AppData\\Local\\mcpvectordb\\models",
+  "transport": "stdio",
+  "note": "In stdio mode the server runs on the same machine as Claude Desktop...",
+  "path_check": {
+    "path": "C:\\Users\\you\\Documents\\report.pdf",
+    "readable": true,
+    "size_bytes": 204800
+  }
+}
+```
+
+`path_check` is only present when `check_path` is supplied.
+If the file is not readable, `path_check.readable` is `false` and `path_check.error` describes why.
+
+---
+
 ## Error Response (all tools)
 
 Any tool may return an error response:

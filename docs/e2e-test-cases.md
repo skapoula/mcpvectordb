@@ -1,7 +1,38 @@
 # End-to-End Test Cases — Claude Desktop Integration
 
 Verify successful integration by pasting each **Prompt** verbatim into a new Claude Desktop conversation.
-The server must be running and connected before starting (confirm with TC-01).
+The server must be running and connected before starting (confirm with TC-00).
+
+---
+
+## TC-00 · Server diagnostics
+
+**Purpose:** Confirm the server is alive and check what it can see — platform, working
+directory, paths, and whether a specific file is reachable. Run this first whenever
+something isn't working before trying any other tool.
+
+**Prompt (basic):**
+> Show me the server info.
+
+**Pass criteria:**
+- Claude calls `server_info`
+- Returns `platform`, `cwd`, `lancedb_uri`, `fastembed_cache_path`, `transport`
+- `platform` is `win32` (on Windows)
+- `lancedb_uri` points to a path inside `AppData\Local\mcpvectordb\lancedb`
+
+**Prompt (with path check):**
+> Use server_info to check if the file C:\Users\you\Documents\test.pdf is readable.
+
+**Pass criteria:**
+- Returns `path_check.readable: true` and `path_check.size_bytes > 0`
+- If `readable: false`, the error message explains why (file not found, permission denied)
+  and you know to fix the path *before* calling `ingest_file`
+
+> **Note on the stdio access model:** In stdio transport the MCP server runs as a
+> subprocess of Claude Desktop on the **same machine, same user account**. It has the
+> same filesystem access you do — it reads files directly, no upload step needed.
+> The HTTP `/upload` endpoint only applies to the SSE/containerised deployment where
+> the server is on a separate machine.
 
 ---
 
@@ -293,6 +324,7 @@ Run in order. Each TC is independent unless a pre-condition is listed.
 
 | TC | Tool exercised | Must pass before shipping |
 |----|---------------|--------------------------|
+| TC-00 | `server_info` | Yes — run first on any failure |
 | TC-01 | `list_libraries` | Yes — gate for all others |
 | TC-02 | `ingest_file` | Yes |
 | TC-03 | `ingest_file` (tilde path) | Yes — Windows-specific |
