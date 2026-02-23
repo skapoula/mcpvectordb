@@ -5,11 +5,13 @@ import logging
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+from starlette.types import Receive, Scope, Send
 
 from mcpvectordb.config import settings
 from mcpvectordb.converter import convert as _convert
@@ -430,6 +432,73 @@ async def upload_handler(request: Request) -> JSONResponse:
         )
 
 
+# ── OAuth Protected Resource Metadata ─────────────────────────────────────────
+@mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
+async def oauth_protected_resource(request: Request) -> JSONResponse:
+    """RFC 9728 Protected Resource Metadata — tells clients to use Google as the AS.
+
+    Always public (no authentication required). Registers this server as a
+    resource protected by Google's authorization server.
+    """
+    resource_url = settings.oauth_resource_url or str(request.base_url).rstrip("/")
+    return JSONResponse(
+        {
+            "resource": resource_url,
+            "authorization_servers": ["https://accounts.google.com"],
+            "bearer_methods_supported": ["header"],
+            "scopes_supported": ["openid", "email"],
+        }
+    )
+
+
+# ── OAuth enforcement middleware ───────────────────────────────────────────────
+class _RequireGoogleAuth:
+    """Enforce authentication on all paths except /.well-known/*.
+
+    Must be added as the inner middleware (after AuthenticationMiddleware) so
+    that scope["user"] is populated before this check runs.
+    """
+
+    _EXCLUDED_PREFIX = "/.well-known/"
+
+    def __init__(self, app: Any) -> None:
+        """Initialise with the inner ASGI application."""
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Pass through /.well-known/* requests; enforce auth on all others."""
+        if scope["type"] == "http":
+            path = scope.get("path", "")
+            if not path.startswith(self._EXCLUDED_PREFIX):
+                user = scope.get("user")
+                if not getattr(user, "is_authenticated", False):
+                    await self._send_401(send)
+                    return
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    async def _send_401(send: Send) -> None:
+        """Send a 401 Unauthorized JSON response."""
+        body = json.dumps(
+            {
+                "error": "invalid_token",
+                "error_description": "Authentication required",
+            }
+        ).encode()
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 401,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                    (b"www-authenticate", b'Bearer realm="mcpvectordb"'),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
+
+
 # ── TLS validation ────────────────────────────────────────────────────────────
 def _validate_tls_config() -> None:
     """Raise ValueError or log a warning if TLS settings are inconsistent."""
@@ -467,10 +536,26 @@ def _validate_tls_config() -> None:
             raise ValueError(f"{label} not found: {p}")
 
 
+# ── OAuth validation ──────────────────────────────────────────────────────────
+def _validate_oauth_config() -> None:
+    """Log a warning or raise ValueError if OAuth settings are inconsistent."""
+    if not settings.oauth_enabled:
+        return
+    if settings.mcp_transport == "stdio":
+        logger.warning(
+            "OAUTH_ENABLED=true has no effect with MCP_TRANSPORT=stdio; "
+            "OAuth only applies to streamable-http."
+        )
+        return
+    if not settings.oauth_client_id:
+        raise ValueError("OAUTH_ENABLED=true requires OAUTH_CLIENT_ID to be set")
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 def main() -> None:
     """Start the MCP server with the configured transport."""
     _validate_tls_config()
+    _validate_oauth_config()
     logger.info("mcpvectordb starting (transport=%s)", settings.mcp_transport)
 
     # Pre-warm embedder at startup to avoid first-call latency
@@ -487,6 +572,22 @@ def main() -> None:
 
         async def _serve() -> None:
             app = mcp.streamable_http_app()
+
+            if settings.oauth_enabled:
+                from mcp.server.auth.middleware.bearer_auth import BearerAuthBackend
+                from starlette.middleware.authentication import AuthenticationMiddleware
+
+                from mcpvectordb.auth import GoogleTokenVerifier
+
+                verifier = GoogleTokenVerifier(
+                    client_id=settings.oauth_client_id,  # type: ignore[arg-type]
+                    allowed_emails=settings.oauth_allowed_emails_list,
+                )
+                # Add _RequireGoogleAuth first (innermost) so it runs after
+                # AuthenticationMiddleware has populated scope["user"].
+                app.add_middleware(_RequireGoogleAuth)
+                app.add_middleware(AuthenticationMiddleware, backend=BearerAuthBackend(verifier))
+
             ssl_certfile: str | None = None
             ssl_keyfile: str | None = None
             if settings.tls_enabled:
