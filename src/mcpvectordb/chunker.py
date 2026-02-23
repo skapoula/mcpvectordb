@@ -11,7 +11,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _tokenizer: "PreTrainedTokenizerBase | None" = None
-_tokenizer_failed: bool = False
 
 # Separator hierarchy for recursive splitting
 _SEPARATORS = ["\n\n", "\n", " ", ""]
@@ -22,42 +21,34 @@ _SEPARATORS = ["\n\n", "\n", " ", ""]
 _HF_TOKENIZER_ID = "nomic-ai/nomic-embed-text-v1.5"
 
 
-def _get_tokenizer() -> "PreTrainedTokenizerBase | None":
-    """Return the tokenizer singleton, or None if it cannot be loaded.
+def _get_tokenizer() -> "PreTrainedTokenizerBase":
+    """Return the tokenizer singleton, loading it on first call.
 
-    Falls back gracefully so chunking still works when the HuggingFace cache
-    is empty and the network is unavailable (e.g. air-gapped Windows machines).
-    Run 'uv run mcpvectordb-download-model' once to pre-populate the cache.
+    Raises:
+        RuntimeError: If the tokenizer is not cached locally. Run
+            'uv run mcpvectordb-download-model' to download it.
     """
-    global _tokenizer, _tokenizer_failed  # noqa: PLW0603
-    if _tokenizer is None and not _tokenizer_failed:
-        try:
-            from transformers import AutoTokenizer
+    global _tokenizer  # noqa: PLW0603
+    if _tokenizer is None:
+        from transformers import AutoTokenizer
 
-            logger.info("Loading tokenizer %s", _HF_TOKENIZER_ID)
+        logger.info("Loading tokenizer %s", _HF_TOKENIZER_ID)
+        try:
             _tokenizer = AutoTokenizer.from_pretrained(  # nosec B615
-                _HF_TOKENIZER_ID
+                _HF_TOKENIZER_ID, local_files_only=True
             )
         except Exception as exc:
-            _tokenizer_failed = True
-            logger.warning(
-                "Tokenizer load failed (%s). "
-                "Run 'uv run mcpvectordb-download-model' to pre-download it. "
-                "Falling back to word-count approximation for chunking.",
-                exc,
-            )
+            raise RuntimeError(
+                f"Tokenizer '{_HF_TOKENIZER_ID}' is not in the local cache. "
+                "Run 'uv run mcpvectordb-download-model' to download it, "
+                "then restart the server."
+            ) from exc
     return _tokenizer
 
 
 def _token_length(text: str) -> int:
-    """Return the token count for *text*, using the exact tokenizer when available.
-
-    Falls back to a word-count approximation (~1.3 tokens/word) when the
-    tokenizer has not been downloaded yet.
-    """
+    """Return the number of tokens in *text* using the embedding tokenizer."""
     tok = _get_tokenizer()
-    if tok is None:
-        return max(1, int(len(text.split()) * 1.3))
     return len(tok.encode(text, add_special_tokens=False))
 
 

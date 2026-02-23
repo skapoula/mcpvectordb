@@ -10,6 +10,7 @@ dependencies = [
     "mcp",
     "lancedb",
     "fastembed",
+    "transformers",
     "markitdown[all]",
     "httpx",
     "pydantic",
