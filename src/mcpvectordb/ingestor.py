@@ -115,6 +115,13 @@ async def ingest(
         except Exception as e:
             raise IngestionError(f"Conversion failed for {source_str!r}") from e
 
+    if not text.strip():
+        raise IngestionError(
+            f"No text could be extracted from {source_str!r}. "
+            "The file may be scanned/image-based, password-protected, or empty. "
+            "Try ingest_content to pass the text directly."
+        )
+
     title = _extract_title(text, source_str)
 
     # ── 4. Chunk ───────────────────────────────────────────────────────────────

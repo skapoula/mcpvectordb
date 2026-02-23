@@ -106,6 +106,16 @@ def chunk(text: str) -> list[str]:
         settings.chunk_overlap_tokens,
     )
     filtered = [c for c in raw_chunks if _token_length(c) >= settings.chunk_min_tokens]
+
+    if not filtered and raw_chunks:
+        # Document is shorter than chunk_min_tokens — index it as a single chunk
+        # rather than silently discarding it.
+        logger.debug(
+            "All chunks below min-token floor (%d); indexing as single chunk",
+            settings.chunk_min_tokens,
+        )
+        filtered = [text.strip()]
+
     logger.debug(
         "Chunked text: %d raw → %d after min-token filter",
         len(raw_chunks),
