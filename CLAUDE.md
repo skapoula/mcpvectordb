@@ -176,6 +176,7 @@ the server version. Breaking changes require a new tool name, not a modified one
 | `list_libraries` | List all libraries with document counts | _(no parameters)_ |
 | `delete_document` | Remove a document and all its chunks | `doc_id: str` |
 | `get_document` | Return full Markdown text of a document | `doc_id: str` |
+| `server_info` | Return server diagnostics; optionally test if a path is readable | `check_path: str \| None = None` |
 
 ---
 

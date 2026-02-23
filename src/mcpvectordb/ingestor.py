@@ -65,7 +65,13 @@ async def ingest(
         try:
             raw_bytes = await asyncio.to_thread(path.read_bytes)
         except OSError as e:
-            raise IngestionError(f"Cannot read file {source_str!r}") from e
+            import os
+
+            raise IngestionError(
+                f"Cannot read file {source_str!r} "
+                f"(server cwd: {os.getcwd()!r}). "
+                "Use server_info(check_path=...) to verify the path is reachable."
+            ) from e
         file_type = path.suffix.lstrip(".").lower() or "unknown"
         try:
             mtime = path.stat().st_mtime

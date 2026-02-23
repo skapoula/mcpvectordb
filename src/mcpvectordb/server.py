@@ -347,6 +347,76 @@ async def get_document(doc_id: str) -> dict:
         return {"error": f"Internal error: {e}", "status": "error"}
 
 
+# ── Tool: server_info ─────────────────────────────────────────────────────────
+@mcp.tool()
+async def server_info(check_path: str | None = None) -> dict:
+    """Return server diagnostics useful for verifying the installation.
+
+    Reports the server's platform, working directory, Python version, and the
+    resolved paths it uses for the vector store and embedding model cache.
+
+    Optionally checks whether a specific file path is readable by the server —
+    pass the path you want to ingest and the server will confirm whether it can
+    see and read that file before you attempt ingestion.
+
+    Args:
+        check_path: Optional file path to test for readability. The server will
+            report whether the file exists and how large it is. Use this to
+            diagnose 'file not found' errors before calling ingest_file.
+
+    Returns:
+        Dict with platform, cwd, python_version, lancedb_uri,
+        fastembed_cache_path, transport, and optionally path_check.
+    """
+    import os
+
+    info: dict[str, Any] = {
+        "platform": sys.platform,
+        "python_version": sys.version.split()[0],
+        "cwd": str(Path.cwd()),
+        "lancedb_uri": str(Path(settings.lancedb_uri).expanduser().resolve()),
+        "fastembed_cache_path": str(
+            Path(settings.fastembed_cache_path).expanduser().resolve()
+        )
+        if settings.fastembed_cache_path
+        else None,
+        "transport": settings.mcp_transport,
+        "note": (
+            "In stdio mode the server runs on the same machine as Claude Desktop "
+            "with the same user permissions. Use check_path to verify a specific "
+            "file is reachable before calling ingest_file."
+        ),
+    }
+
+    if check_path:
+        resolved = Path(check_path).expanduser().resolve()
+        if resolved.exists():
+            try:
+                size = resolved.stat().st_size
+                # Confirm read permission by opening briefly
+                with resolved.open("rb") as fh:
+                    fh.read(1)
+                info["path_check"] = {
+                    "path": str(resolved),
+                    "readable": True,
+                    "size_bytes": size,
+                }
+            except OSError as e:
+                info["path_check"] = {
+                    "path": str(resolved),
+                    "readable": False,
+                    "error": str(e),
+                }
+        else:
+            info["path_check"] = {
+                "path": str(resolved),
+                "readable": False,
+                "error": "File does not exist",
+            }
+
+    return info
+
+
 # ── HTTP upload endpoint ───────────────────────────────────────────────────────
 @mcp.custom_route("/upload", methods=["POST"])
 async def upload_handler(request: Request) -> JSONResponse:
