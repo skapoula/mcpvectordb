@@ -35,7 +35,7 @@ def _get_tokenizer() -> "PreTrainedTokenizerBase":
         logger.info("Loading tokenizer %s", _HF_TOKENIZER_ID)
         try:
             _tokenizer = AutoTokenizer.from_pretrained(  # nosec B615
-                _HF_TOKENIZER_ID, local_files_only=True
+                _HF_TOKENIZER_ID, local_files_only=True, trust_remote_code=True
             )
         except Exception as exc:
             raise RuntimeError(
