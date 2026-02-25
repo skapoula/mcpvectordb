@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from mcpvectordb.chunker import chunk
 from mcpvectordb.config import settings
-from mcpvectordb.converter import convert
+from mcpvectordb.converter import SUPPORTED_EXTENSIONS, convert
 from mcpvectordb.embedder import get_embedder
 from mcpvectordb.exceptions import IngestionError, UnsupportedFormatError
 from mcpvectordb.store import ChunkRecord, Store
@@ -29,6 +29,105 @@ class IngestResult(BaseModel):
     source: str
     library: str
     chunk_count: int
+
+
+class BulkIngestResult(BaseModel):
+    """Result returned from a bulk folder ingest call."""
+
+    folder: str
+    library: str
+    total_files: int
+    indexed: int
+    replaced: int
+    skipped: int
+    failed: int
+    results: list[IngestResult]
+    errors: list[dict]  # [{"file": str, "error": str}]
+
+
+async def _ingest_one(
+    sem: asyncio.Semaphore,
+    file_path: Path,
+    library: str,
+    metadata: dict | None,
+    store: Store,
+) -> IngestResult:
+    """Ingest one file under a concurrency semaphore."""
+    async with sem:
+        return await ingest(
+            source=file_path, library=library, metadata=metadata, store=store
+        )
+
+
+async def ingest_folder(
+    folder: Path | str,
+    library: str,
+    metadata: dict | None,
+    store: Store,
+    recursive: bool = True,
+    max_concurrency: int = 4,
+) -> BulkIngestResult:
+    """Ingest all supported documents in a folder concurrently.
+
+    Scans the folder for files with supported extensions and ingests them in
+    parallel (up to max_concurrency at a time). Files that fail are recorded
+    in errors without stopping the rest of the batch.
+
+    Args:
+        folder: Path to the folder to scan.
+        library: Library name to index documents under.
+        metadata: Optional user-supplied key-value metadata.
+        store: Store instance to write chunks to.
+        recursive: Whether to scan subdirectories recursively. Defaults to True.
+        max_concurrency: Maximum files to ingest simultaneously. Defaults to 4.
+
+    Returns:
+        BulkIngestResult with per-file results and error summary.
+
+    Raises:
+        IngestionError: If the folder path does not exist or is not a directory.
+    """
+    folder_path = Path(folder).expanduser().resolve()
+    if not folder_path.exists() or not folder_path.is_dir():
+        raise IngestionError(
+            f"Folder not found or not a directory: {str(folder)!r}. "
+            "Use server_info(check_path=...) to verify the path is reachable."
+        )
+
+    pattern = "**/*" if recursive else "*"
+    candidates = sorted(
+        p for p in folder_path.glob(pattern)
+        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
+    )
+
+    sem = asyncio.Semaphore(max(1, max_concurrency))
+    raw = await asyncio.gather(
+        *[_ingest_one(sem, p, library, metadata, store) for p in candidates],
+        return_exceptions=True,
+    )
+
+    results: list[IngestResult] = []
+    errors: list[dict] = []
+    for file_path, outcome in zip(candidates, raw, strict=True):
+        # Both IngestionError and UnsupportedFormatError are captured here via
+        # return_exceptions=True — all failures are recorded without stopping the batch.
+        if isinstance(outcome, BaseException):
+            logger.warning("Failed to ingest %s: %s", file_path, outcome)
+            errors.append({"file": str(file_path), "error": str(outcome)})
+        else:
+            results.append(outcome)
+
+    return BulkIngestResult(
+        folder=str(folder_path),
+        library=library,
+        total_files=len(candidates),
+        indexed=sum(1 for r in results if r.status == "indexed"),
+        replaced=sum(1 for r in results if r.status == "replaced"),
+        skipped=sum(1 for r in results if r.status == "skipped"),
+        failed=len(errors),
+        results=results,
+        errors=errors,
+    )
 
 
 async def ingest(

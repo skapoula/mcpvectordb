@@ -10,7 +10,7 @@ from mcpvectordb.exceptions import UnsupportedFormatError
 logger = logging.getLogger(__name__)
 
 # Extensions MarkItDown[all] can handle. Checked before calling to give a clear error.
-_SUPPORTED_EXTENSIONS = {
+SUPPORTED_EXTENSIONS = {
     ".pdf",
     ".docx",
     ".doc",
@@ -55,10 +55,10 @@ def convert(source: Path) -> str:
         IngestionError: If MarkItDown fails to convert the file.
     """
     ext = source.suffix.lower()
-    if ext not in _SUPPORTED_EXTENSIONS:
+    if ext not in SUPPORTED_EXTENSIONS:
         raise UnsupportedFormatError(
             f"Unsupported file extension: {ext!r}. "
-            f"Supported: {sorted(_SUPPORTED_EXTENSIONS)}"
+            f"Supported: {sorted(SUPPORTED_EXTENSIONS)}"
         )
 
     logger.debug("Converting %s (ext=%s)", source, ext)

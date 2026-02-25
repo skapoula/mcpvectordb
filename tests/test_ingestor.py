@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from mcpvectordb.exceptions import IngestionError, UnsupportedFormatError
-from mcpvectordb.ingestor import IngestResult, ingest
+from mcpvectordb.ingestor import BulkIngestResult, IngestResult, ingest, ingest_folder
 
 
 def run(coro):
@@ -434,3 +434,207 @@ class TestIngestHelpers:
 
         with pytest.raises(IngestionError, match="HTML conversion failed"):
             run(_convert_html_bytes(b"<html><body>test</body></html>", "https://example.com"))
+
+
+class TestIngestFolder:
+    """Tests for ingest_folder() bulk ingestion."""
+
+    @pytest.mark.integration
+    async def test_ingest_folder_indexes_supported_files(
+        self, tmp_path, store, mock_embedder, _patch_chunker, _patch_converter
+    ):
+        """Folder with 2 .pdf and 1 .txt → total_files=3, indexed=3, failed=0."""
+        (tmp_path / "a.pdf").write_bytes(b"%PDF minimal")
+        (tmp_path / "b.pdf").write_bytes(b"%PDF minimal2")
+        (tmp_path / "c.txt").write_text("some text content")
+
+        # max_concurrency=1 avoids LanceDB concurrent-write race during table init
+        result = await ingest_folder(
+            folder=tmp_path, library="default", metadata=None, store=store,
+            max_concurrency=1,
+        )
+
+        assert result.total_files == 3
+        assert result.indexed == 3
+        assert result.failed == 0
+
+    @pytest.mark.integration
+    async def test_ingest_folder_skips_unsupported_extensions(
+        self, tmp_path, store, mock_embedder, _patch_chunker, _patch_converter
+    ):
+        """Folder with .pdf + .xyz → only .pdf counted (total_files=1)."""
+        (tmp_path / "doc.pdf").write_bytes(b"%PDF minimal")
+        (tmp_path / "data.xyz").write_text("unsupported")
+
+        result = await ingest_folder(
+            folder=tmp_path, library="default", metadata=None, store=store
+        )
+
+        assert result.total_files == 1
+        assert result.indexed == 1
+
+    @pytest.mark.integration
+    async def test_ingest_folder_recursive_finds_nested_files(
+        self, tmp_path, store, mock_embedder, _patch_chunker, _patch_converter
+    ):
+        """docs/sub/file.pdf with recursive=True → found."""
+        sub = tmp_path / "docs" / "sub"
+        sub.mkdir(parents=True)
+        (sub / "file.pdf").write_bytes(b"%PDF nested")
+
+        result = await ingest_folder(
+            folder=tmp_path,
+            library="default",
+            metadata=None,
+            store=store,
+            recursive=True,
+        )
+
+        assert result.total_files == 1
+        assert result.indexed == 1
+
+    @pytest.mark.integration
+    async def test_ingest_folder_non_recursive_ignores_subdirs(
+        self, tmp_path, store, mock_embedder, _patch_chunker, _patch_converter
+    ):
+        """docs/sub/file.pdf with recursive=False → not found."""
+        sub = tmp_path / "docs" / "sub"
+        sub.mkdir(parents=True)
+        (sub / "file.pdf").write_bytes(b"%PDF nested")
+
+        result = await ingest_folder(
+            folder=tmp_path,
+            library="default",
+            metadata=None,
+            store=store,
+            recursive=False,
+        )
+
+        assert result.total_files == 0
+
+    @pytest.mark.integration
+    async def test_ingest_folder_one_failure_does_not_stop_batch(
+        self, tmp_path, store, monkeypatch
+    ):
+        """Monkeypatch ingest to raise on one path; assert failed=1 and others indexed."""
+        (tmp_path / "good.pdf").write_bytes(b"%PDF good")
+        (tmp_path / "bad.pdf").write_bytes(b"%PDF bad")
+        (tmp_path / "also_good.txt").write_text("text content")
+
+        async def _selective_ingest(source, library, metadata, store):
+            if str(source).endswith("bad.pdf"):
+                raise IngestionError("simulated failure")
+            return IngestResult(
+                status="indexed",
+                doc_id="fake-doc-id",
+                source=str(source),
+                library=library,
+                chunk_count=3,
+            )
+
+        monkeypatch.setattr("mcpvectordb.ingestor.ingest", _selective_ingest)
+
+        result = await ingest_folder(
+            folder=tmp_path, library="default", metadata=None, store=store
+        )
+
+        assert result.failed == 1
+        assert result.indexed == 2
+        assert len(result.errors) == 1
+        assert "bad.pdf" in result.errors[0]["file"]
+
+    @pytest.mark.integration
+    async def test_ingest_folder_missing_folder_raises(self, tmp_path, store):
+        """Non-existent path raises IngestionError."""
+        with pytest.raises(IngestionError):
+            await ingest_folder(
+                folder=tmp_path / "does_not_exist",
+                library="default",
+                metadata=None,
+                store=store,
+            )
+
+    @pytest.mark.integration
+    async def test_ingest_folder_file_path_raises(self, tmp_path, store):
+        """Passing a file path (not a dir) raises IngestionError."""
+        f = tmp_path / "doc.pdf"
+        f.write_bytes(b"%PDF content")
+
+        with pytest.raises(IngestionError):
+            await ingest_folder(
+                folder=f, library="default", metadata=None, store=store
+            )
+
+    @pytest.mark.integration
+    async def test_ingest_folder_returns_bulk_ingest_result(
+        self, tmp_path, store, mock_embedder, _patch_chunker, _patch_converter
+    ):
+        """Return type is BulkIngestResult."""
+        (tmp_path / "doc.pdf").write_bytes(b"%PDF content")
+
+        result = await ingest_folder(
+            folder=tmp_path, library="default", metadata=None, store=store
+        )
+
+        assert isinstance(result, BulkIngestResult)
+
+    @pytest.mark.integration
+    async def test_ingest_folder_empty_folder_returns_zero_totals(
+        self, tmp_path, store
+    ):
+        """Empty dir → total_files=0, indexed=0, failed=0."""
+        result = await ingest_folder(
+            folder=tmp_path, library="default", metadata=None, store=store
+        )
+
+        assert result.total_files == 0
+        assert result.indexed == 0
+        assert result.failed == 0
+
+    @pytest.mark.integration
+    async def test_ingest_folder_parallel_all_results_collected(
+        self, tmp_path, store, monkeypatch
+    ):
+        """Folder with 6 files, max_concurrency=3 → all 6 in results, failed=0."""
+        for i in range(6):
+            (tmp_path / f"doc{i}.pdf").write_bytes(b"%PDF content")
+
+        async def _fake_ingest(source, library, metadata, store):
+            return IngestResult(
+                status="indexed",
+                doc_id="fake-id",
+                source=str(source),
+                library=library,
+                chunk_count=1,
+            )
+
+        monkeypatch.setattr("mcpvectordb.ingestor.ingest", _fake_ingest)
+
+        result = await ingest_folder(
+            folder=tmp_path,
+            library="default",
+            metadata=None,
+            store=store,
+            max_concurrency=3,
+        )
+
+        assert len(result.results) == 6
+        assert result.failed == 0
+
+    @pytest.mark.unit
+    async def test_ingest_folder_max_concurrency_zero_clamped_to_one(
+        self, tmp_path, store, mock_embedder, _patch_chunker, _patch_converter
+    ):
+        """max_concurrency=0 is clamped to 1 and still returns BulkIngestResult."""
+        (tmp_path / "doc.pdf").write_bytes(b"%PDF content")
+
+        result = await ingest_folder(
+            folder=tmp_path,
+            library="default",
+            metadata=None,
+            store=store,
+            max_concurrency=0,
+        )
+
+        assert isinstance(result, BulkIngestResult)
+        assert result.total_files == 1
