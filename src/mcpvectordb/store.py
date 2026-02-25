@@ -7,6 +7,7 @@ from pathlib import Path
 
 import lancedb
 import numpy as np
+import pyarrow as pa
 from pydantic import BaseModel
 
 from mcpvectordb.config import settings
@@ -34,6 +35,34 @@ class ChunkRecord(BaseModel):
     page: int  # 1-indexed page number; 0 = unknown or not applicable
 
 
+def _lance_schema() -> pa.Schema:
+    """Return the canonical Arrow schema for the documents table.
+
+    Uses explicit types so the schema is never inferred from Python literals,
+    which prevents dimension-mismatch bugs when environment variables override
+    settings between runs.
+    """
+    dim = settings.embedding_dimension
+    return pa.schema(
+        [
+            pa.field("id", pa.string()),
+            pa.field("doc_id", pa.string()),
+            pa.field("library", pa.string()),
+            pa.field("source", pa.string()),
+            pa.field("content_hash", pa.string()),
+            pa.field("title", pa.string()),
+            pa.field("content", pa.string()),
+            pa.field("embedding", pa.list_(pa.float32(), dim)),
+            pa.field("chunk_index", pa.int64()),
+            pa.field("created_at", pa.string()),
+            pa.field("metadata", pa.string()),
+            pa.field("file_type", pa.string()),
+            pa.field("last_modified", pa.string()),
+            pa.field("page", pa.int64()),
+        ]
+    )
+
+
 def _open_table(uri: str, table_name: str) -> lancedb.table.Table:
     """Open (or create) the LanceDB table.
 
@@ -45,7 +74,8 @@ def _open_table(uri: str, table_name: str) -> lancedb.table.Table:
         An open LanceDB Table object.
 
     Raises:
-        StoreError: If the connection or table open fails.
+        StoreError: If the connection or table open fails, or if the existing
+            table's embedding dimension does not match settings.embedding_dimension.
     """
     try:
         # Expand ~ for local paths
@@ -57,27 +87,11 @@ def _open_table(uri: str, table_name: str) -> lancedb.table.Table:
         )
         if table_name in existing:
             table = db.open_table(table_name)
+            _validate_embedding_dimension(table)
             _migrate_table(table)
         else:
-            # Create table with a dummy record to establish schema, then delete it
-            schema_record = {
-                "id": "_schema_init_",
-                "doc_id": "",
-                "library": "",
-                "source": "",
-                "content_hash": "",
-                "title": "",
-                "content": "",
-                "embedding": [0.0] * settings.embedding_dimension,
-                "chunk_index": 0,
-                "created_at": "",
-                "metadata": "{}",
-                "file_type": "",
-                "last_modified": "",
-                "page": 0,
-            }
-            table = db.create_table(table_name, data=[schema_record])
-            table.delete("id = '_schema_init_'")
+            # Create table with an explicit PyArrow schema — no dummy record needed.
+            table = db.create_table(table_name, schema=_lance_schema())
         # Create scalar indexes on commonly filtered columns (idempotent)
         for col in ("library", "doc_id", "source"):
             try:
@@ -87,10 +101,38 @@ def _open_table(uri: str, table_name: str) -> lancedb.table.Table:
                     "Scalar index on %r not created (may need data first)", col
                 )
         return table
+    except StoreError:
+        raise
     except Exception as e:
         raise StoreError(
             f"Failed to open LanceDB table {table_name!r} at {uri!r}"
         ) from e
+
+
+def _validate_embedding_dimension(table: lancedb.table.Table) -> None:
+    """Raise StoreError if the table's embedding column dimension doesn't match settings.
+
+    Args:
+        table: Open LanceDB table to validate.
+
+    Raises:
+        StoreError: If the dimension in the stored schema differs from
+            settings.embedding_dimension.
+    """
+    try:
+        field = table.schema.field("embedding")
+        stored_dim = field.type.list_size
+    except Exception:
+        return  # can't determine — skip validation
+
+    expected = settings.embedding_dimension
+    if stored_dim != expected:
+        raise StoreError(
+            f"Embedding dimension mismatch: the existing index stores {stored_dim}d "
+            f"vectors but EMBEDDING_DIMENSION={expected}. "
+            "Either restore the original EMBEDDING_DIMENSION value or delete the index "
+            "and re-ingest all documents."
+        )
 
 
 def _migrate_table(table: lancedb.table.Table) -> None:
@@ -191,6 +233,12 @@ class Store:
         try:
             table = self._table()
             rows = [c.model_dump() for c in chunks]
+            # Convert embeddings to float32 numpy arrays to satisfy the
+            # FixedSizeList<float32> Arrow schema — Python lists are typed as
+            # ListType and only cast correctly when the sizes match, while numpy
+            # arrays are always unambiguous.
+            for row in rows:
+                row["embedding"] = np.array(row["embedding"], dtype=np.float32)
             table.add(rows)
             logger.info("Upserted %d chunks (doc_id=%s)", len(chunks), chunks[0].doc_id)
             try:
