@@ -13,8 +13,8 @@
 `mcpvectordb` is an MCP (Model Context Protocol) server that gives Claude Desktop
 semantic search over a personal document library. Documents are ingested from local
 files or URLs, converted to Markdown via **MarkItDown**, chunked, embedded, and stored
-in **LanceDB**. Claude Desktop queries the server over stdio (local) or SSE over HTTP
-(hosted on k3s), both supported via a single config flag.
+in **LanceDB**. Claude Desktop queries the server over stdio (local), SSE, or
+streamable-http (k3s hosted with optional OAuth/TLS), all supported via a single config flag.
 
 ```
 Local files / URLs
@@ -31,8 +31,9 @@ LanceDB  ◄──────────────────── configu
        │
        ▼
 MCP Server
-  ├── stdio transport   ◄──► Claude Desktop (host OS subprocess)
-  └── SSE/HTTP transport◄──► Claude Desktop (k3s hosted, URL-based)
+  ├── stdio transport        ◄──► Claude Desktop (host OS subprocess)
+  ├── sse transport          ◄──► Claude Desktop (k3s hosted, URL-based)
+  └── streamable-http        ◄──► Claude Desktop (k3s hosted, OAuth + TLS)
 ```
 
 **Supported input formats (via `markitdown[all]`):**
@@ -58,13 +59,17 @@ mcpvectordb/
 ├── src/
 │   └── mcpvectordb/
 │       ├── __init__.py
+│       ├── __main__.py        # python -m mcpvectordb entry point (freeze_support for Windows)
 │       ├── server.py          # MCP entry point; registers tools; selects transport (inline)
 │       ├── exceptions.py      # Domain exception classes
 │       ├── ingestor.py        # Orchestrates file/URL → Markdown → LanceDB pipeline
 │       ├── converter.py       # markitdown[all] wrapper; dispatch by extension/MIME
 │       ├── chunker.py         # Recursive token-aware text splitting
-│       ├── embedder.py        # sentence-transformers wrapper; batched encoding
+│       ├── embedder.py        # fastembed wrapper; task-specific prefixes; batched encoding
 │       ├── store.py           # LanceDB read/write; schema; migration helpers
+│       ├── auth.py            # Google OAuth Resource Server (RFC 9728); token cache
+│       ├── cli.py             # mcpvectordb-ingest CLI for offline bulk folder ingestion
+│       ├── _download_model.py # mcpvectordb-download-model CLI; pre-caches model + tokenizer
 │       └── config.py          # pydantic-settings; all settings from .env
 ├── tests/
 │   ├── conftest.py            # Fixtures: tmp LanceDB dir, sample docs per format
@@ -72,10 +77,17 @@ mcpvectordb/
 │   ├── test_chunker.py
 │   ├── test_embedder.py
 │   ├── test_store.py
-│   ├── test_ingestor.py       # Ingestor pipeline, dedup scenarios
-│   └── test_server.py         # MCP tool contract tests
+│   ├── test_ingestor.py       # Ingestor pipeline, dedup scenarios, bulk folder ingestion
+│   ├── test_server.py         # MCP tool contract tests
+│   ├── test_server_init.py    # Server startup and configuration validation
+│   ├── test_auth.py           # Google token verification and cache behaviour
+│   ├── test_config.py         # Settings loading and platform defaults
+│   ├── test_cli.py            # CLI argument parsing and folder ingestion
+│   └── test_tls_config.py     # TLS configuration validation
 ├── docs/
-│   └── mcp-tool-spec.md       # Tool names, input schemas, return schemas — source of truth
+│   ├── mcp-tool-spec.md       # Tool names, input schemas, return schemas — source of truth
+│   ├── windows-setup.md       # Windows-specific installation and configuration guidance
+│   └── e2e-test-cases.md      # Integration test scenarios
 ├── examples/
 │   └── sample_docs/           # Small fixture files, one per supported format
 ├── deploy/
@@ -107,8 +119,17 @@ uv sync
 # Run server — stdio transport (Claude Desktop subprocess mode)
 uv run mcpvectordb
 
-# Run server — SSE/HTTP transport (k3s hosted mode)
+# Run server — SSE transport (k3s hosted mode)
 MCP_TRANSPORT=sse MCP_HOST=0.0.0.0 MCP_PORT=8000 uv run mcpvectordb
+
+# Run server — streamable-http transport (with optional OAuth/TLS)
+MCP_TRANSPORT=streamable-http MCP_HOST=0.0.0.0 MCP_PORT=8000 uv run mcpvectordb
+
+# Pre-download embedding model + tokenizer to local cache (run once after uv sync)
+uv run mcpvectordb-download-model
+
+# Bulk ingest a folder without starting the MCP server
+uv run mcpvectordb-ingest /path/to/docs --library my-library
 
 # Run tests (excludes slow audio/OCR tests by default)
 uv run pytest
@@ -171,6 +192,7 @@ the server version. Breaking changes require a new tool name, not a modified one
 | `ingest_file` | Convert a local file and index it | `path: str`, `library: str = "default"`, `metadata: dict \| None` |
 | `ingest_url` | Fetch a URL, convert, and index it | `url: str`, `library: str = "default"`, `metadata: dict \| None` |
 | `ingest_content` | Index pre-extracted text directly (e.g. from a user upload) | `content: str`, `source: str`, `library: str = "default"`, `metadata: dict \| None` |
+| `ingest_folder` | Bulk-ingest all supported files in a folder (async, concurrent) | `folder: str`, `library: str = "default"`, `metadata: dict \| None`, `recursive: bool = True`, `max_concurrency: int = 4` |
 | `search` | Semantic search over the index | `query: str`, `top_k: int = 5`, `library: str \| None = None`, `filter: dict \| None` |
 | `list_documents` | List indexed documents with metadata | `library: str \| None = None`, `limit: int = 20`, `offset: int = 0` |
 | `list_libraries` | List all libraries with document counts | _(no parameters)_ |
@@ -212,9 +234,10 @@ All runtime settings go through `config.py` (pydantic-settings). Never hardcode 
 # .env.example — commit this file; never commit .env
 
 # ── Transport ──────────────────────────────────────────────────────────────────
-MCP_TRANSPORT=stdio            # stdio | sse
-MCP_HOST=127.0.0.1             # SSE only — bind address
-MCP_PORT=8000                  # SSE only — listen port
+MCP_TRANSPORT=stdio            # stdio | sse | streamable-http
+MCP_HOST=127.0.0.1             # sse / streamable-http only — bind address
+MCP_PORT=8000                  # sse / streamable-http only — listen port
+ALLOWED_HOSTS=localhost,127.0.0.1  # DNS rebinding protection (streamable-http)
 
 # ── LanceDB ────────────────────────────────────────────────────────────────────
 # Set this to match your deployment mode:
@@ -226,8 +249,13 @@ LANCEDB_TABLE_NAME=documents
 DEFAULT_LIBRARY=default            # fallback library name when not specified in tool call
 
 # ── Embedding ──────────────────────────────────────────────────────────────────
-EMBEDDING_MODEL=nomic-embed-text-v1.5  # WARNING: changing this requires full re-index
+EMBEDDING_MODEL=nomic-ai/nomic-embed-text-v1.5  # WARNING: changing this requires full re-index
 EMBEDDING_BATCH_SIZE=32
+EMBEDDING_DIMENSION=768            # must match the model above; do not change independently
+
+# ── Search ─────────────────────────────────────────────────────────────────────
+HYBRID_SEARCH_ENABLED=true         # BM25 full-text + vector; falls back to vector-only
+SEARCH_REFINE_FACTOR=10            # ANN re-ranking candidates (higher = better recall)
 
 # ── Chunking ───────────────────────────────────────────────────────────────────
 CHUNK_SIZE_TOKENS=512
@@ -237,6 +265,17 @@ CHUNK_MIN_TOKENS=50
 # ── URL fetching ───────────────────────────────────────────────────────────────
 HTTP_TIMEOUT_SECONDS=10
 HTTP_USER_AGENT=mcpvectordb/1.0
+
+# ── TLS (streamable-http only) ─────────────────────────────────────────────────
+TLS_ENABLED=false
+TLS_CERT_FILE=                     # path to PEM certificate
+TLS_KEY_FILE=                      # path to PEM private key
+
+# ── OAuth (streamable-http only) ───────────────────────────────────────────────
+OAUTH_ENABLED=false
+OAUTH_CLIENT_ID=                   # Google OAuth client ID
+OAUTH_RESOURCE_URL=                # RFC 9728 resource URL
+OAUTH_ALLOWED_EMAILS=              # comma-separated allowlist; empty = any Google account
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 LOG_LEVEL=INFO                     # DEBUG | INFO | WARNING | ERROR
@@ -298,7 +337,7 @@ Beyond the global rules in `/workspace/.claude/rules/code-style.md`:
 | **embedding** | Dense float vector produced by the embedding model for a chunk |
 | **MCP tool** | A named, schema-typed function the server exposes to Claude Desktop |
 | **ingest** | Full pipeline: fetch/read → convert → chunk → embed → store |
-| **transport** | How Claude Desktop connects: `stdio` (subprocess) or `sse` (HTTP) |
+| **transport** | How Claude Desktop connects: `stdio` (subprocess), `sse`, or `streamable-http` (OAuth/TLS) |
 | **MarkItDown** | Microsoft's open-source file-to-Markdown library (`markitdown[all]`) |
 | **LanceDB** | Embedded vector DB; no separate server process; supports local + S3 URIs |
 
