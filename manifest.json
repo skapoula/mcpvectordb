@@ -1,0 +1,68 @@
+{
+  "manifest_version": "0.4",
+  "name": "mcpvectordb",
+  "display_name": "mcpvectordb — Personal Semantic Search",
+  "version": "0.1.0",
+  "description": "Semantic search over your personal document library. Ingest local files (PDF, Word, HTML, images) or URLs and search them with natural language from any Claude conversation.",
+  "long_description": "mcpvectordb gives Claude a personal document library with hybrid semantic search. Documents are converted to Markdown via MarkItDown, chunked, embedded with nomic-embed-text-v1.5 (768d, ONNX, CPU-only), and stored in a local LanceDB vector database. Search combines BM25 full-text and dense vector retrieval with reciprocal rank fusion. All data stays local — nothing leaves your machine. Note: the embedding model (~270 MB) is downloaded automatically on first launch.",
+  "author": {
+    "name": "mcpvectordb contributors"
+  },
+  "server": {
+    "type": "uv",
+    "entry_point": "src/mcpvectordb/server.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": ["run", "--directory", "${__dirname}", "mcpvectordb"],
+      "env": {
+        "MCP_TRANSPORT": "stdio",
+        "LANCEDB_URI": "${user_config.lancedb_uri}",
+        "DEFAULT_LIBRARY": "${user_config.default_library}",
+        "LOG_LEVEL": "${user_config.log_level}"
+      }
+    }
+  },
+  "tools": [
+    {"name": "ingest_file",    "description": "Convert a local file and index it for semantic search"},
+    {"name": "ingest_url",     "description": "Fetch a URL, convert it, and index it for semantic search"},
+    {"name": "ingest_content", "description": "Index pre-extracted text directly (e.g. from a user upload)"},
+    {"name": "search",         "description": "Hybrid semantic search (BM25 + vector) over the document library"},
+    {"name": "list_documents", "description": "List indexed documents with metadata, with pagination"},
+    {"name": "list_libraries", "description": "List all document collections with document and chunk counts"},
+    {"name": "ingest_folder",  "description": "Bulk-ingest all supported files in a folder (recursive, concurrent)"},
+    {"name": "delete_document","description": "Remove a document and all its chunks from the index"},
+    {"name": "get_document",   "description": "Retrieve the full reconstructed Markdown text of an indexed document"},
+    {"name": "server_info",    "description": "Return server diagnostics and optionally test if a path is readable"}
+  ],
+  "keywords": ["semantic-search", "vector-search", "rag", "documents", "pdf", "lancedb"],
+  "license": "MIT",
+  "user_config": {
+    "lancedb_uri": {
+      "type": "directory",
+      "title": "LanceDB storage folder",
+      "description": "Folder where the vector index is stored. Created automatically on first run. Changing this after indexing documents means your existing index will not be found — you will need to re-ingest.",
+      "default": "~/.mcpvectordb/lancedb",
+      "required": false
+    },
+    "default_library": {
+      "type": "string",
+      "title": "Default library name",
+      "description": "Collection used when no library is specified in a tool call. Letters, numbers, hyphens, and underscores recommended.",
+      "default": "default",
+      "required": false
+    },
+    "log_level": {
+      "type": "string",
+      "title": "Log level",
+      "description": "Server log verbosity written to stderr. One of: DEBUG, INFO, WARNING, ERROR.",
+      "default": "INFO",
+      "required": false
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "linux", "win32"],
+    "runtimes": {
+      "python": ">=3.11"
+    }
+  }
+}
