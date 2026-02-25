@@ -22,6 +22,7 @@ dependencies = [
 [project.scripts]
 mcpvectordb = "mcpvectordb.server:main"
 mcpvectordb-download-model = "mcpvectordb._download_model:main"
+mcpvectordb-ingest = "mcpvectordb.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mcpvectordb"]

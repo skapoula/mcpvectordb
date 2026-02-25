@@ -19,6 +19,7 @@ from mcpvectordb.embedder import get_embedder
 from mcpvectordb.exceptions import IngestionError, StoreError, UnsupportedFormatError
 from mcpvectordb.ingestor import ingest
 from mcpvectordb.ingestor import ingest_content as _ingest_content
+from mcpvectordb.ingestor import ingest_folder as _ingest_folder
 from mcpvectordb.store import Store
 
 # ── Logging setup ──────────────────────────────────────────────────────────────
@@ -172,6 +173,54 @@ async def ingest_content(
         return {"error": f"Ingestion failed: {e}", "status": "error"}
     except Exception as e:
         logger.exception("Unexpected error in ingest_content")
+        return {"error": f"Internal error: {e}", "status": "error"}
+
+
+# ── Tool: ingest_folder ───────────────────────────────────────────────────────
+@mcp.tool()
+async def ingest_folder(
+    folder: str,
+    library: str = "default",
+    metadata: dict | None = None,
+    recursive: bool = True,
+    max_concurrency: int = 4,
+) -> dict:
+    """Ingest all supported documents in a folder into the vector index.
+
+    Scans the folder for files with supported extensions and runs them through
+    the full pipeline (convert → chunk → embed → store) in parallel. Up to
+    max_concurrency files are processed simultaneously. Files that fail are
+    reported in the errors list without stopping the rest of the batch.
+
+    Args:
+        folder: Absolute or relative path to the folder to ingest.
+        library: Library (collection) name. Defaults to 'default'.
+        metadata: Optional key-value metadata to attach to every document.
+        recursive: Scan subdirectories recursively. Defaults to True.
+        max_concurrency: Max files processed simultaneously. Defaults to 4.
+
+    Returns:
+        Dict with total_files, indexed, replaced, skipped, failed counts,
+        a results list (one IngestResult per file), and an errors list.
+    """
+    if not folder or not folder.strip():
+        return {"error": "folder must not be empty", "status": "error"}
+    if max_concurrency < 1:
+        return {"error": "max_concurrency must be at least 1", "status": "error"}
+    try:
+        result = await _ingest_folder(
+            folder=folder,
+            library=library,
+            metadata=metadata,
+            store=_store,
+            recursive=recursive,
+            max_concurrency=max_concurrency,
+        )
+        return result.model_dump()
+    except IngestionError as e:
+        return {"error": f"Folder ingestion failed: {e}", "status": "error"}
+    except Exception as e:
+        logger.exception("Unexpected error in ingest_folder")
         return {"error": f"Internal error: {e}", "status": "error"}
 
 

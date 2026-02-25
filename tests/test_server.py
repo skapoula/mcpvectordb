@@ -1052,3 +1052,98 @@ class TestUploadEndpoint:
         )
         assert response.status_code == 500
         assert "Conversion failed" in response.json()["error"]
+
+
+class TestIngestFolderTool:
+    """MCP contract tests for the ingest_folder tool handler."""
+
+    @pytest.mark.unit
+    def test_ingest_folder_empty_string_returns_error(self):
+        """folder='' returns error dict."""
+        from mcpvectordb import server
+
+        result = run(server.ingest_folder(folder=""))
+        assert result["status"] == "error"
+        assert "error" in result
+
+    @pytest.mark.unit
+    def test_ingest_folder_whitespace_returns_error(self):
+        """folder='  ' (whitespace only) returns error dict."""
+        from mcpvectordb import server
+
+        result = run(server.ingest_folder(folder="   "))
+        assert result["status"] == "error"
+
+    @pytest.mark.unit
+    def test_ingest_folder_missing_dir_returns_error(self, monkeypatch):
+        """Non-existent folder path returns error dict."""
+        from mcpvectordb import server
+        from mcpvectordb.exceptions import IngestionError
+
+        async def _raise(*args, **kwargs):
+            raise IngestionError("Folder not found")
+
+        monkeypatch.setattr("mcpvectordb.server._ingest_folder", _raise)
+
+        result = run(server.ingest_folder(folder="/does/not/exist"))
+        assert result["status"] == "error"
+        assert "error" in result
+
+    @pytest.mark.unit
+    def test_ingest_folder_max_concurrency_invalid_returns_error(self):
+        """max_concurrency=0 returns error dict."""
+        from mcpvectordb import server
+
+        result = run(server.ingest_folder(folder="/some/path", max_concurrency=0))
+        assert result["status"] == "error"
+        assert "max_concurrency" in result["error"]
+
+    @pytest.mark.unit
+    def test_ingest_folder_returns_expected_schema(self, tmp_path, monkeypatch):
+        """Success case returns dict with all required keys."""
+        from mcpvectordb import server
+        from mcpvectordb.ingestor import BulkIngestResult, IngestResult
+
+        async def _fake_ingest_folder(*args, **kwargs):
+            return BulkIngestResult(
+                folder=str(tmp_path),
+                library="default",
+                total_files=2,
+                indexed=2,
+                replaced=0,
+                skipped=0,
+                failed=0,
+                results=[
+                    IngestResult(
+                        status="indexed",
+                        doc_id="doc-1",
+                        source=str(tmp_path / "a.pdf"),
+                        library="default",
+                        chunk_count=3,
+                    ),
+                    IngestResult(
+                        status="indexed",
+                        doc_id="doc-2",
+                        source=str(tmp_path / "b.pdf"),
+                        library="default",
+                        chunk_count=2,
+                    ),
+                ],
+                errors=[],
+            )
+
+        monkeypatch.setattr("mcpvectordb.server._ingest_folder", _fake_ingest_folder)
+
+        result = run(server.ingest_folder(folder=str(tmp_path)))
+
+        expected_keys = (
+            "total_files", "indexed", "replaced",
+            "skipped", "failed", "results", "errors",
+        )
+        for key in expected_keys:
+            assert key in result, f"Missing key: {key}"
+        assert result["total_files"] == 2
+        assert result["indexed"] == 2
+        assert result["failed"] == 0
+        assert isinstance(result["results"], list)
+        assert isinstance(result["errors"], list)

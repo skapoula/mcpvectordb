@@ -10,7 +10,7 @@
 | Field | Value |
 |-------|-------|
 | Name | `mcpvectordb` |
-| Version | `0.2.0` |
+| Version | `0.3.0` |
 | Transport | `stdio` (default) or `sse` (HTTP, k3s) |
 | Embedding model | `nomic-embed-text-v1.5` (768d) |
 | Search | Hybrid BM25 + vector (reciprocal rank fusion) |
@@ -299,6 +299,63 @@ as structured error responses.
 
 ## HTTP Endpoints
 
+### `ingest_folder`
+
+Ingest all supported documents in a folder into the vector index.
+
+Scans the folder for files with supported extensions and runs them through the full
+pipeline (convert → chunk → embed → store) in parallel. Files that fail are reported
+in `errors` without stopping the rest of the batch.
+
+**Input schema:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `folder` | `string` | Yes | — | Absolute or relative path to the folder to ingest |
+| `library` | `string` | No | `"default"` | Library (collection) to index into |
+| `metadata` | `object \| null` | No | `null` | Key-value metadata attached to every document |
+| `recursive` | `boolean` | No | `true` | Scan subdirectories recursively |
+| `max_concurrency` | `integer` | No | `4` | Max files processed simultaneously (≥ 1) |
+
+**Output schema (success):**
+
+```json
+{
+  "folder": "/abs/path/to/folder",
+  "library": "default",
+  "total_files": 12,
+  "indexed": 10,
+  "replaced": 1,
+  "skipped": 1,
+  "failed": 0,
+  "results": [
+    {
+      "status": "indexed",
+      "doc_id": "<uuid>",
+      "source": "/abs/path/to/folder/doc.pdf",
+      "library": "default",
+      "chunk_count": 8
+    }
+  ],
+  "errors": []
+}
+```
+
+`errors` contains one entry per failed file: `{"file": "<path>", "error": "<message>"}`.
+
+**Output schema (error):**
+
+```json
+{ "status": "error", "error": "Human-readable error message" }
+```
+
+**Guard conditions:**
+- `folder` empty → error
+- `max_concurrency < 1` → error
+- Folder path does not exist or is a file → `IngestionError` → error response
+
+---
+
 ### POST /upload
 
 Upload a file directly from any HTTP client. The server receives the raw bytes and
@@ -336,3 +393,45 @@ curl -X POST https://<host>/upload \
 Invoke-RestMethod -Uri "https://<host>/upload" -Method Post `
   -Form @{ file = Get-Item "C:\docs\report.pdf"; library = "research" }
 ```
+
+---
+
+## Standalone CLI — `mcpvectordb-ingest`
+
+Bulk-ingest a folder of documents without starting the MCP server. Writes to the same
+LanceDB path as the server (controlled by `LANCEDB_URI`), so the store is ready when
+Claude Desktop connects the next morning.
+
+**Usage:**
+
+```bash
+mcpvectordb-ingest <folder> [options]
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--library <name>` | `default` | Library to index into |
+| `--no-recursive` | *(off)* | Do not scan subdirectories |
+| `--max-concurrency <n>` | `4` | Max files processed simultaneously |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | All files ingested successfully (or none found) |
+| 1 | One or more files failed, or a fatal error occurred |
+| 2 | Invalid arguments (argparse error) |
+
+**Example — overnight indexing workflow:**
+
+```bash
+# Index a research folder overnight
+mcpvectordb-ingest ~/Documents/research --library research --max-concurrency 8
+
+# Next morning: start the MCP server — Claude Desktop queries the pre-built store
+uv run mcpvectordb
+```
+
+Errors are printed to `stderr`; the summary is printed to `stdout`.
