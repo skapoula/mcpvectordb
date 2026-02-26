@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import mcpvectordb.server as server_module
+from mcpvectordb.exceptions import ConfigurationError
 from mcpvectordb.server import _validate_tls_config
 
 
@@ -59,7 +60,7 @@ def test_sse_logs_warning(
 
 @pytest.mark.unit
 def test_missing_both_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    """TLS enabled, streamable-http, no cert or key — ValueError naming both vars."""
+    """TLS enabled, streamable-http, no cert or key — ConfigurationError naming both vars."""
     mock_settings = _make_settings(
         tls_enabled=True,
         mcp_transport="streamable-http",
@@ -67,7 +68,7 @@ def test_missing_both_raises(monkeypatch: pytest.MonkeyPatch) -> None:
         tls_key_file=None,
     )
     monkeypatch.setattr(server_module, "settings", mock_settings)
-    with pytest.raises(ValueError, match="TLS_CERT_FILE"):
+    with pytest.raises(ConfigurationError, match="TLS_CERT_FILE"):
         _validate_tls_config()
 
 
@@ -75,7 +76,7 @@ def test_missing_both_raises(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_missing_key_raises(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """TLS enabled, cert file exists, key is None — ValueError naming TLS_KEY_FILE."""
+    """TLS enabled, cert file exists, key is None — ConfigurationError naming TLS_KEY_FILE."""
     cert = tmp_path / "cert.pem"
     cert.write_text("cert")
     mock_settings = _make_settings(
@@ -85,7 +86,7 @@ def test_missing_key_raises(
         tls_key_file=None,
     )
     monkeypatch.setattr(server_module, "settings", mock_settings)
-    with pytest.raises(ValueError, match="TLS_KEY_FILE"):
+    with pytest.raises(ConfigurationError, match="TLS_KEY_FILE"):
         _validate_tls_config()
 
 
@@ -93,7 +94,7 @@ def test_missing_key_raises(
 def test_cert_not_found_raises(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """TLS enabled, cert path does not exist on disk — ValueError with 'not found'."""
+    """TLS enabled, cert path does not exist on disk — ConfigurationError with 'not found'."""
     key = tmp_path / "key.pem"
     key.write_text("key")
     mock_settings = _make_settings(
@@ -103,7 +104,7 @@ def test_cert_not_found_raises(
         tls_key_file=str(key),
     )
     monkeypatch.setattr(server_module, "settings", mock_settings)
-    with pytest.raises(ValueError, match="not found"):
+    with pytest.raises(ConfigurationError, match="not found"):
         _validate_tls_config()
 
 
@@ -111,7 +112,7 @@ def test_cert_not_found_raises(
 def test_key_not_found_raises(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """TLS enabled, key path does not exist on disk — ValueError with 'not found'."""
+    """TLS enabled, key path does not exist on disk — ConfigurationError with 'not found'."""
     cert = tmp_path / "cert.pem"
     cert.write_text("cert")
     mock_settings = _make_settings(
@@ -121,7 +122,7 @@ def test_key_not_found_raises(
         tls_key_file=str(tmp_path / "missing_key.pem"),
     )
     monkeypatch.setattr(server_module, "settings", mock_settings)
-    with pytest.raises(ValueError, match="not found"):
+    with pytest.raises(ConfigurationError, match="not found"):
         _validate_tls_config()
 
 

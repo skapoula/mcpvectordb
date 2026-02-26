@@ -9,6 +9,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from mcpvectordb.config import settings
+from mcpvectordb.exceptions import ConfigurationError
 
 
 def run(coro):
@@ -810,7 +811,7 @@ class TestValidateOAuthConfig:
 
     @pytest.mark.unit
     def test_missing_client_id_raises(self, monkeypatch):
-        """OAUTH_ENABLED=true without client_id raises ValueError."""
+        """OAUTH_ENABLED=true without client_id raises ConfigurationError."""
         import mcpvectordb.config as config_mod
         from mcpvectordb.server import _validate_oauth_config
 
@@ -818,7 +819,7 @@ class TestValidateOAuthConfig:
         monkeypatch.setattr(config_mod.settings, "mcp_transport", "streamable-http")
         monkeypatch.setattr(config_mod.settings, "oauth_client_id", None)
 
-        with pytest.raises(ValueError, match="OAUTH_CLIENT_ID"):
+        with pytest.raises(ConfigurationError, match="OAUTH_CLIENT_ID"):
             _validate_oauth_config()
 
     @pytest.mark.unit

@@ -1,5 +1,6 @@
 """MCP server entry point — registers tools and selects transport."""
 
+import asyncio
 import json
 import logging
 import sys
@@ -16,7 +17,12 @@ from starlette.types import Receive, Scope, Send
 from mcpvectordb.config import settings
 from mcpvectordb.converter import convert as _convert
 from mcpvectordb.embedder import get_embedder
-from mcpvectordb.exceptions import IngestionError, StoreError, UnsupportedFormatError
+from mcpvectordb.exceptions import (
+    ConfigurationError,
+    IngestionError,
+    StoreError,
+    UnsupportedFormatError,
+)
 from mcpvectordb.ingestor import ingest
 from mcpvectordb.ingestor import ingest_content as _ingest_content
 from mcpvectordb.ingestor import ingest_folder as _ingest_folder
@@ -80,6 +86,8 @@ async def ingest_file(
     Returns:
         Dict with status, doc_id, source, library, chunk_count.
     """
+    if not path or not path.strip():
+        return {"error": "path must not be empty", "status": "error"}
     try:
         result = await ingest(
             source=Path(path).expanduser().resolve(),
@@ -253,15 +261,14 @@ async def search(
     if top_k < 1 or top_k > 100:
         return {"error": "top_k must be between 1 and 100", "status": "error"}
     try:
-        import asyncio
-
         embedding = await asyncio.to_thread(get_embedder().embed_query, query)
-        records = _store.search(
-            embedding=embedding.tolist(),
-            query_text=query,
-            top_k=top_k,
-            library=library,
-            filter=filter,
+        records = await asyncio.to_thread(
+            _store.search,
+            embedding.tolist(),
+            query,
+            top_k,
+            library,
+            filter,
         )
         return {
             "results": [
@@ -302,14 +309,16 @@ async def list_documents(
         offset: Number of documents to skip for pagination.
 
     Returns:
-        Dict with 'documents' list and 'total' count.
+        Dict with 'documents' list and 'count' of returned documents (≤ limit).
     """
     if limit < 1 or limit > 1000:
         return {"error": "limit must be between 1 and 1000", "status": "error"}
     if offset < 0:
         return {"error": "offset must be non-negative", "status": "error"}
     try:
-        docs = _store.list_documents(library=library, limit=limit, offset=offset)
+        docs = await asyncio.to_thread(
+            _store.list_documents, library, limit, offset
+        )
         return {"documents": docs, "count": len(docs)}
     except StoreError as e:
         return {"error": f"list_documents failed: {e}", "status": "error"}
@@ -327,7 +336,7 @@ async def list_libraries() -> dict:
         Dict with 'libraries' list. Each entry has library, document_count, chunk_count.
     """
     try:
-        libs = _store.list_libraries()
+        libs = await asyncio.to_thread(_store.list_libraries)
         return {"libraries": libs}
     except StoreError as e:
         return {"error": f"list_libraries failed: {e}", "status": "error"}
@@ -350,7 +359,7 @@ async def delete_document(doc_id: str) -> dict:
     if not doc_id.strip():
         return {"error": "doc_id must not be empty", "status": "error"}
     try:
-        deleted = _store.delete_document(doc_id)
+        deleted = await asyncio.to_thread(_store.delete_document, doc_id)
         return {"doc_id": doc_id, "deleted_chunks": deleted, "status": "deleted"}
     except StoreError as e:
         return {"error": f"delete_document failed: {e}", "status": "error"}
@@ -375,7 +384,7 @@ async def get_document(doc_id: str) -> dict:
     if not doc_id.strip():
         return {"error": "doc_id must not be empty", "status": "error"}
     try:
-        records = _store.get_document(doc_id)
+        records = await asyncio.to_thread(_store.get_document, doc_id)
         if not records:
             return {"error": f"Document not found: {doc_id}", "status": "error"}
         first = records[0]
@@ -516,8 +525,6 @@ async def upload_handler(request: Request) -> JSONResponse:
 
         # Convert bytes → Markdown on the server (full markitdown pipeline).
         # Use asyncio.to_thread because _convert is a blocking call.
-        import asyncio
-
         markdown = await asyncio.to_thread(_convert, tmp_path)
     except UnsupportedFormatError as e:
         return JSONResponse(
@@ -531,6 +538,21 @@ async def upload_handler(request: Request) -> JSONResponse:
     finally:
         if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
+
+    # Empty markdown means the file has no extractable text (scanned PDF, etc.) —
+    # that is a client content problem, not a server error.
+    if not markdown or not markdown.strip():
+        return JSONResponse(
+            {
+                "status": "error",
+                "error": (
+                    f"No text could be extracted from {filename!r}. "
+                    "The file may be scanned/image-based, password-protected, or empty. "
+                    "Use ingest_content to pass the text directly."
+                ),
+            },
+            status_code=422,
+        )
 
     # Ingest the converted Markdown using the original filename as source so that
     # dedup and the index label use the real name, not the temp path.
@@ -623,7 +645,7 @@ class _RequireGoogleAuth:
 
 # ── TLS validation ────────────────────────────────────────────────────────────
 def _validate_tls_config() -> None:
-    """Raise ValueError or log a warning if TLS settings are inconsistent."""
+    """Raise ConfigurationError or log a warning if TLS settings are inconsistent."""
     if not settings.tls_enabled:
         return
     if settings.mcp_transport == "stdio":
@@ -648,19 +670,19 @@ def _validate_tls_config() -> None:
         if not val
     ]
     if missing:
-        raise ValueError(f"TLS_ENABLED=true but missing: {', '.join(missing)}")
+        raise ConfigurationError(f"TLS_ENABLED=true but missing: {', '.join(missing)}")
     for label, path_str in (
         ("TLS_CERT_FILE", settings.tls_cert_file),
         ("TLS_KEY_FILE", settings.tls_key_file),
     ):
         p = Path(path_str).expanduser().resolve()  # type: ignore[arg-type]
         if not p.exists():
-            raise ValueError(f"{label} not found: {p}")
+            raise ConfigurationError(f"{label} not found: {p}")
 
 
 # ── OAuth validation ──────────────────────────────────────────────────────────
 def _validate_oauth_config() -> None:
-    """Log a warning or raise ValueError if OAuth settings are inconsistent."""
+    """Log a warning or raise ConfigurationError if OAuth settings are inconsistent."""
     if not settings.oauth_enabled:
         return
     if settings.mcp_transport == "stdio":
@@ -670,7 +692,7 @@ def _validate_oauth_config() -> None:
         )
         return
     if not settings.oauth_client_id:
-        raise ValueError("OAUTH_ENABLED=true requires OAUTH_CLIENT_ID to be set")
+        raise ConfigurationError("OAUTH_ENABLED=true requires OAUTH_CLIENT_ID to be set")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -698,8 +720,10 @@ def main() -> None:
     _validate_oauth_config()
     logger.info("mcpvectordb starting (transport=%s)", settings.mcp_transport)
 
-    # Ensure runtime data directories exist before any I/O
-    Path(settings.lancedb_uri).expanduser().mkdir(parents=True, exist_ok=True)
+    # Ensure runtime data directories exist before any I/O.
+    # Skip for S3 URIs — Path("s3://...").mkdir() would create a spurious local dir.
+    if not settings.lancedb_uri.startswith("s3://"):
+        Path(settings.lancedb_uri).expanduser().mkdir(parents=True, exist_ok=True)
     if settings.log_file:
         Path(settings.log_file).expanduser().parent.mkdir(parents=True, exist_ok=True)
     if settings.fastembed_cache_path:
@@ -723,8 +747,6 @@ def main() -> None:
     if settings.mcp_transport == "stdio":
         mcp.run(transport="stdio")
     elif settings.mcp_transport == "streamable-http":
-        import asyncio
-
         import uvicorn
 
         async def _serve() -> None:
