@@ -15,14 +15,12 @@ _tokenizer: "PreTrainedTokenizerBase | None" = None
 # Separator hierarchy for recursive splitting
 _SEPARATORS = ["\n\n", "\n", " ", ""]
 
-# The HuggingFace Hub model ID for the tokenizer.
-# settings.embedding_model is the fastembed short name ("nomic-embed-text-v1.5");
-# the HuggingFace Hub requires the full org-prefixed ID.
-_HF_TOKENIZER_ID = "nomic-ai/nomic-embed-text-v1.5"
-
 
 def _get_tokenizer() -> "PreTrainedTokenizerBase":
     """Return the tokenizer singleton, loading it on first call.
+
+    Uses settings.embedding_model as the HuggingFace Hub model ID so the
+    tokenizer always matches the configured embedding model.
 
     Raises:
         RuntimeError: If the tokenizer is not cached locally. Run
@@ -32,14 +30,15 @@ def _get_tokenizer() -> "PreTrainedTokenizerBase":
     if _tokenizer is None:
         from transformers import AutoTokenizer
 
-        logger.info("Loading tokenizer %s", _HF_TOKENIZER_ID)
+        model_id = settings.embedding_model
+        logger.info("Loading tokenizer %s", model_id)
         try:
             _tokenizer = AutoTokenizer.from_pretrained(  # nosec B615
-                _HF_TOKENIZER_ID, local_files_only=True, trust_remote_code=True
+                model_id, local_files_only=True, trust_remote_code=True
             )
         except Exception as exc:
             raise RuntimeError(
-                f"Tokenizer '{_HF_TOKENIZER_ID}' is not in the local cache. "
+                f"Tokenizer '{model_id}' is not in the local cache. "
                 "Run 'uv run mcpvectordb-download-model' to download it, "
                 "then restart the server."
             ) from exc
@@ -55,22 +54,38 @@ def _token_length(text: str) -> int:
 def _merge_splits(
     splits: list[str], separator: str, chunk_size: int, overlap: int
 ) -> list[str]:
-    """Merge small splits into chunks respecting chunk_size and overlap."""
+    """Merge small splits into chunks respecting chunk_size and overlap.
+
+    Token lengths for each split are cached to avoid redundant tokenizer calls
+    during overlap trimming. Separator tokens are counted in the assembled
+    chunk length so the configured limit is never silently exceeded.
+    """
+    sep_len = _token_length(separator) if separator else 0
     chunks: list[str] = []
     current: list[str] = []
+    lengths: list[int] = []  # cached token lengths, parallel to current
     current_len = 0
 
     for split in splits:
         split_len = _token_length(split)
+        # Separator tokens added before this split when current is non-empty
+        sep_addition = sep_len if current else 0
         # If adding this split would exceed chunk_size, flush current
-        if current_len + split_len > chunk_size and current:
+        if current_len + sep_addition + split_len > chunk_size and current:
             chunks.append(separator.join(current))
             # Keep overlap: drop splits from the front until under overlap budget
             while current and current_len > overlap:
-                removed = current.pop(0)
-                current_len -= _token_length(removed)
+                removed_len = lengths.pop(0)
+                current.pop(0)
+                current_len -= removed_len
+                if current:
+                    # The separator that preceded this element is also gone
+                    current_len -= sep_len
+            # Recalculate sep_addition after overlap trimming
+            sep_addition = sep_len if current else 0
         current.append(split)
-        current_len += split_len
+        lengths.append(split_len)
+        current_len += sep_addition + split_len
 
     if current:
         chunks.append(separator.join(current))
@@ -81,7 +96,15 @@ def _merge_splits(
 def _split_recursive(
     text: str, separators: list[str], chunk_size: int, overlap: int
 ) -> list[str]:
-    """Recursively split text using the first separator that produces usable pieces."""
+    """Recursively split text using the first separator that produces usable pieces.
+
+    Sub-pieces that required recursion are not re-joined with the parent separator;
+    they are flushed as independent chunks to preserve the separator that was
+    actually used at each recursion level.
+
+    For the character-level fallback (empty separator), the text is encoded once
+    and decoded as token windows to avoid O(n) per-character tokenizer calls.
+    """
     if not separators:
         # No more separators — return text as-is (may be oversized, caller filters)
         return [text]
@@ -89,19 +112,43 @@ def _split_recursive(
     sep = separators[0]
     remaining = separators[1:]
 
-    # Character-level split as last resort when sep is empty string
-    splits = list(text) if sep == "" else text.split(sep)
+    # Character-level last resort: encode once and decode sliding windows.
+    if sep == "":
+        tok = _get_tokenizer()
+        token_ids = tok.encode(text, add_special_tokens=False)
+        if len(token_ids) <= chunk_size:
+            return [text]
+        step = max(1, chunk_size - overlap)
+        return [
+            tok.decode(token_ids[i : i + chunk_size])
+            for i in range(0, len(token_ids), step)
+        ]
 
-    all_splits: list[str] = []
+    splits = text.split(sep)
+
+    # Separate direct (small) splits from oversized ones that need recursion.
+    # Flush good_splits before appending recursed output so each group is merged
+    # with the separator that was actually used to produce its pieces.
+    final_chunks: list[str] = []
+    good_splits: list[str] = []
+
     for s in splits:
         if not s:
             continue
         if _token_length(s) > chunk_size:
-            all_splits.extend(_split_recursive(s, remaining, chunk_size, overlap))
+            if good_splits:
+                final_chunks.extend(
+                    _merge_splits(good_splits, sep, chunk_size, overlap)
+                )
+                good_splits = []
+            final_chunks.extend(_split_recursive(s, remaining, chunk_size, overlap))
         else:
-            all_splits.append(s)
+            good_splits.append(s)
 
-    return _merge_splits(all_splits, sep if sep else "", chunk_size, overlap)
+    if good_splits:
+        final_chunks.extend(_merge_splits(good_splits, sep, chunk_size, overlap))
+
+    return final_chunks
 
 
 def chunk(text: str) -> list[str]:
@@ -125,13 +172,13 @@ def chunk(text: str) -> list[str]:
     filtered = [c for c in raw_chunks if _token_length(c) >= settings.chunk_min_tokens]
 
     if not filtered and raw_chunks:
-        # Document is shorter than chunk_min_tokens — index it as a single chunk
-        # rather than silently discarding it.
+        # Document is shorter than chunk_min_tokens — preserve raw_chunks rather
+        # than returning text.strip() which is not size-validated.
         logger.debug(
-            "All chunks below min-token floor (%d); indexing as single chunk",
+            "All chunks below min-token floor (%d); indexing document as-is",
             settings.chunk_min_tokens,
         )
-        filtered = [text.strip()]
+        filtered = raw_chunks
 
     logger.debug(
         "Chunked text: %d raw → %d after min-token filter",
