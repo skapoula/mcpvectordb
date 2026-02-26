@@ -165,3 +165,4 @@ All paths are overridable via `.env` or the `env` block in `claude_desktop_confi
 | `ingest_file` error: path not found | Use a full absolute path (e.g. `C:\Users\you\Documents\report.pdf`); `~\` is also supported |
 | `.exe` antivirus warning | Add `mcpvectordb.exe` to your antivirus exclusions; false-positive common with PyInstaller bundles |
 | `.exe` first launch slow (5–10 s) | Normal — PyInstaller extracts the bundle to a temp directory on first launch |
+| Cryptic Arrow error in `table.add()` or schema mismatch on ingest | `EMBEDDING_DIMENSION` or `EMBEDDING_MODEL` is set as a shell/system environment variable and is overriding `.env`. Remove those variables from your environment — let pydantic-settings read them exclusively from `.env`. |
