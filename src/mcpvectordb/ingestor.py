@@ -100,6 +100,15 @@ async def ingest_folder(
         if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
     )
 
+    if not candidates:
+        logger.warning(
+            "No supported files found in %s (recursive=%s). "
+            "Supported extensions: %s",
+            folder_path,
+            recursive,
+            ", ".join(sorted(SUPPORTED_EXTENSIONS)),
+        )
+
     sem = asyncio.Semaphore(max(1, max_concurrency))
     raw = await asyncio.gather(
         *[_ingest_one(sem, p, library, metadata, store) for p in candidates],
@@ -197,13 +206,6 @@ async def ingest(
         )
 
     if existing_doc_id is not None:
-        logger.info(
-            "Replacing %s in library %r (doc_id=%s)",
-            source_str,
-            library,
-            existing_doc_id,
-        )
-        await asyncio.to_thread(store.delete_document, existing_doc_id)
         ingest_status = "replaced"
     else:
         ingest_status = "indexed"
@@ -212,7 +214,6 @@ async def ingest(
     if is_url:
         text = await _convert_html_bytes(raw_bytes, source_str)
     else:
-        path = Path(source) if not isinstance(source, Path) else source
         try:
             text = await asyncio.to_thread(convert, path)
         except UnsupportedFormatError:
@@ -272,6 +273,24 @@ async def ingest(
         await asyncio.to_thread(store.upsert_chunks, records)
     except Exception as e:
         raise IngestionError(f"Store write failed for {source_str!r}") from e
+
+    # ── 7. Delete old version only after new write succeeds ────────────────────
+    if ingest_status == "replaced" and existing_doc_id is not None:
+        logger.info(
+            "Replacing %s in library %r — deleting old doc_id=%s",
+            source_str,
+            library,
+            existing_doc_id,
+        )
+        try:
+            await asyncio.to_thread(store.delete_document, existing_doc_id)
+        except Exception:
+            logger.warning(
+                "New version of %s written (doc_id=%s) but old doc_id=%s could not be deleted — index may contain duplicates",
+                source_str,
+                doc_id,
+                existing_doc_id,
+            )
 
     logger.info(
         "%s %s → %d chunks in library %r (doc_id=%s)",
@@ -339,19 +358,19 @@ async def ingest_content(
         )
 
     if existing_doc_id is not None:
-        logger.info(
-            "Replacing %s in library %r (doc_id=%s)",
-            source_str,
-            library,
-            existing_doc_id,
-        )
-        await asyncio.to_thread(store.delete_document, existing_doc_id)
         ingest_status = "replaced"
     else:
         ingest_status = "indexed"
 
+    if not content.strip():
+        raise IngestionError(
+            f"No text content provided for {source_str!r}. "
+            "Pass non-empty Markdown or plain text."
+        )
+
     title = _extract_title(content, source_str)
-    file_type = source_str.rsplit(".", 1)[-1].lower() if "." in source_str else "text"
+    _raw_ext = source_str.rsplit(".", 1)[-1].lower() if "." in source_str else ""
+    file_type = _raw_ext if f".{_raw_ext}" in SUPPORTED_EXTENSIONS else "text"
     now = datetime.now(UTC).isoformat()
 
     # ── 2. Chunk ───────────────────────────────────────────────────────────────
@@ -396,6 +415,24 @@ async def ingest_content(
         await asyncio.to_thread(store.upsert_chunks, records)
     except Exception as e:
         raise IngestionError(f"Store write failed for {source_str!r}") from e
+
+    # ── 5. Delete old version only after new write succeeds ────────────────────
+    if ingest_status == "replaced" and existing_doc_id is not None:
+        logger.info(
+            "Replacing %s in library %r — deleting old doc_id=%s",
+            source_str,
+            library,
+            existing_doc_id,
+        )
+        try:
+            await asyncio.to_thread(store.delete_document, existing_doc_id)
+        except Exception:
+            logger.warning(
+                "New version of %s written (doc_id=%s) but old doc_id=%s could not be deleted — index may contain duplicates",
+                source_str,
+                doc_id,
+                existing_doc_id,
+            )
 
     logger.info(
         "%s %s → %d chunks in library %r (doc_id=%s)",
