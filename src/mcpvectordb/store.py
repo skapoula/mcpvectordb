@@ -92,14 +92,6 @@ def _open_table(uri: str, table_name: str) -> lancedb.table.Table:
         else:
             # Create table with an explicit PyArrow schema — no dummy record needed.
             table = db.create_table(table_name, schema=_lance_schema())
-        # Create scalar indexes on commonly filtered columns (idempotent)
-        for col in ("library", "doc_id", "source"):
-            try:
-                table.create_scalar_index(col, replace=True)
-            except Exception:
-                logger.debug(
-                    "Scalar index on %r not created (may need data first)", col
-                )
         return table
     except StoreError:
         raise
@@ -107,6 +99,27 @@ def _open_table(uri: str, table_name: str) -> lancedb.table.Table:
         raise StoreError(
             f"Failed to open LanceDB table {table_name!r} at {uri!r}"
         ) from e
+
+
+def _ensure_scalar_indexes(table: lancedb.table.Table) -> None:
+    """Create scalar indexes on commonly filtered columns (idempotent).
+
+    Called once per Store instance after the table is first opened. Scalar indexes
+    require at least one row to be created; failures are logged as warnings rather
+    than silently ignored.
+
+    Args:
+        table: Open LanceDB table to index.
+    """
+    for col in ("library", "doc_id", "source"):
+        try:
+            table.create_scalar_index(col, replace=True)
+        except Exception as e:
+            logger.warning(
+                "Scalar index on %r not created (table may be empty — will retry on next write): %s",
+                col,
+                e,
+            )
 
 
 def _validate_embedding_dimension(table: lancedb.table.Table) -> None:
@@ -214,10 +227,15 @@ class Store:
         """
         self._uri = uri or settings.lancedb_uri
         self._table_name = table_name or settings.lancedb_table_name
+        self._indexes_created = False
 
     def _table(self) -> lancedb.table.Table:
-        """Open and return the LanceDB table."""
-        return _open_table(self._uri, self._table_name)
+        """Open and return the LanceDB table, creating scalar indexes on first call."""
+        table = _open_table(self._uri, self._table_name)
+        if not self._indexes_created:
+            _ensure_scalar_indexes(table)
+            self._indexes_created = True
+        return table
 
     def upsert_chunks(self, chunks: list[ChunkRecord]) -> None:
         """Write a list of chunk records to the store.
@@ -297,14 +315,49 @@ class Store:
         try:
             table = self._table()
             safe_id = doc_id.replace("'", "''")
+            # count_rows() snapshots are non-atomic: concurrent writes between the
+            # two calls can make the delta wrong, but this is acceptable for a
+            # single-user server where exact counts are informational only.
             before = table.count_rows()
             table.delete(f"doc_id = '{safe_id}'")
             after = table.count_rows()
             deleted = before - after
             logger.info("Deleted %d chunks for doc_id=%s", deleted, doc_id)
+            # Rebuild FTS index so deleted chunks no longer appear in BM25 results.
+            try:
+                table.create_fts_index("content", replace=True)
+                logger.debug("FTS index rebuilt after delete of doc_id=%s", doc_id)
+            except Exception as fts_err:
+                logger.warning(
+                    "FTS index rebuild failed after delete (hybrid search may return stale results): %s",
+                    fts_err,
+                )
             return deleted
         except Exception as e:
             raise StoreError(f"Failed to delete document {doc_id!r}") from e
+
+    def _vector_search(
+        self,
+        table: lancedb.table.Table,
+        embedding: list[float],
+        where: str | None,
+        top_k: int,
+    ) -> list[dict]:
+        """Run a pure vector (ANN) search against an open table.
+
+        Args:
+            table: Open LanceDB table.
+            embedding: Query vector.
+            where: Optional SQL WHERE clause string.
+            top_k: Maximum number of results to return.
+
+        Returns:
+            Raw row dicts from LanceDB.
+        """
+        q = table.search(np.array(embedding, dtype=np.float32))
+        if where is not None:
+            q = q.where(where)
+        return q.refine_factor(settings.search_refine_factor).limit(top_k).to_list()
 
     def search(
         self,
@@ -339,8 +392,9 @@ class Store:
             table = self._table()
             where = _build_where_clause(library, filter)
 
-            try:
-                if settings.hybrid_search_enabled:
+            rows: list[dict] = []
+            if settings.hybrid_search_enabled:
+                try:
                     query = table.search(query_text, query_type="hybrid").vector(
                         np.array(embedding, dtype=np.float32)
                     )
@@ -351,26 +405,20 @@ class Store:
                         .limit(top_k)
                         .to_list()
                     )
-                else:
-                    raise ValueError("hybrid disabled")
-            except Exception as hybrid_err:
-                if settings.hybrid_search_enabled:
+                except Exception as hybrid_err:
                     logger.warning(
                         "Hybrid search fell back to vector-only: %s", hybrid_err
                     )
-                q = table.search(np.array(embedding, dtype=np.float32))
-                if where is not None:
-                    q = q.where(where)
-                rows = (
-                    q.refine_factor(settings.search_refine_factor)
-                    .limit(top_k)
-                    .to_list()
-                )
+                    rows = self._vector_search(table, embedding, where, top_k)
+            else:
+                rows = self._vector_search(table, embedding, where, top_k)
 
             return [
                 ChunkRecord(**{k: v for k, v in row.items() if k != "_distance"})
                 for row in rows
             ]
+        except StoreError:
+            raise
         except Exception as e:
             raise StoreError("Search failed") from e
 
@@ -425,6 +473,8 @@ class Store:
             if library is not None:
                 safe_lib = library.replace("'", "''")
                 q = q.where(f"library = '{safe_lib}'")
+            # LanceDB has no server-side GROUP BY; all rows are fetched and
+            # aggregated in Python. limit/offset are applied after aggregation.
             rows = q.to_list()
 
             # Group by doc_id — keep first occurrence for metadata
@@ -461,6 +511,8 @@ class Store:
         """
         try:
             table = self._table()
+            # LanceDB has no server-side GROUP BY; all rows are fetched and
+            # aggregated in Python.
             rows = table.search().to_list()
 
             libs: dict[str, dict] = {}
@@ -476,15 +528,17 @@ class Store:
                 libs[lib]["chunk_count"] += 1
                 libs[lib]["_docs"].add(row["doc_id"])
 
-            result = []
-            for lib_data in libs.values():
-                result.append(
+            result = sorted(
+                [
                     {
                         "library": lib_data["library"],
                         "document_count": len(lib_data["_docs"]),
                         "chunk_count": lib_data["chunk_count"],
                     }
-                )
+                    for lib_data in libs.values()
+                ],
+                key=lambda d: d["library"],
+            )
             return result
         except Exception as e:
             raise StoreError("list_libraries failed") from e
