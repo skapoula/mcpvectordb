@@ -110,13 +110,7 @@ class Embedder:
         try:
             prefixed = _QUERY_PREFIX + query
             vecs = list(self._model.embed([prefixed]))
-            vec = np.array(vecs[0], dtype=np.float32)
-            if vec.shape != (settings.embedding_dimension,):
-                raise EmbeddingError(
-                    f"Model returned vector of shape {vec.shape}; "
-                    f"expected ({settings.embedding_dimension},)"
-                )
-            return vec
+            return np.array(vecs[0], dtype=np.float32)
         except EmbeddingError:
             raise
         except Exception as e:

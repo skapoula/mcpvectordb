@@ -140,40 +140,38 @@ class TestEmbedderUnit:
 
     @pytest.mark.unit
     def test_embed_documents_returns_float32_array(self):
-        """embed_documents returns float32 array of shape (n, embedding_dimension) on success."""
+        """embed_documents returns float32 array of shape (n, 768) on success (line 64)."""
         from unittest.mock import MagicMock
 
         from mcpvectordb.embedder import Embedder
 
         emb = object.__new__(Embedder)
         mock_model = MagicMock()
-        dim = settings.embedding_dimension
-        mock_model.embed.return_value = [np.random.rand(dim).astype(np.float32) for _ in range(2)]
+        mock_model.embed.return_value = [np.random.rand(768).astype(np.float32) for _ in range(2)]
         emb._model = mock_model
         emb._batch_size = 32
 
         result = emb.embed_documents(["text one", "text two"])
 
-        assert result.shape == (2, dim)
+        assert result.shape == (2, 768)
         assert result.dtype == np.float32
 
     @pytest.mark.unit
     def test_embed_query_returns_float32_vector(self):
-        """embed_query returns float32 array of shape (embedding_dimension,) on success."""
+        """embed_query returns float32 array of shape (768,) on success (lines 82-89)."""
         from unittest.mock import MagicMock
 
         from mcpvectordb.embedder import Embedder
 
         emb = object.__new__(Embedder)
         mock_model = MagicMock()
-        dim = settings.embedding_dimension
-        mock_model.embed.return_value = [np.random.rand(dim).astype(np.float32)]
+        mock_model.embed.return_value = [np.random.rand(768).astype(np.float32)]
         emb._model = mock_model
         emb._batch_size = 32
 
         result = emb.embed_query("what is the capital?")
 
-        assert result.shape == (dim,)
+        assert result.shape == (768,)
         assert result.dtype == np.float32
 
     @pytest.mark.unit
