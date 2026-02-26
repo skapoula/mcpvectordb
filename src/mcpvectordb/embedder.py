@@ -84,7 +84,9 @@ class Embedder:
                 raise EmbeddingError(
                     f"Model returned {len(vecs)} vectors for {len(texts)} documents"
                 )
-            return np.array(vecs, dtype=np.float32)
+            result = np.array(vecs, dtype=np.float32)
+            logger.debug("Embedded %d chunks → %s float32", len(texts), result.shape)
+            return result
         except EmbeddingError:
             raise
         except Exception as e:
