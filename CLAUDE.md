@@ -316,13 +316,11 @@ Audio transcription and image OCR are slow — tag those tests `@pytest.mark.slo
 
 ## Code Style
 
-Beyond the global rules in `/workspace/.claude/rules/code-style.md`:
+Full rules in `.claude/rules/code-style.md` (loaded automatically). Key reminders:
 
-- Python 3.11+. Type hints on all public function signatures (params + return type).
-- Ruff for linting and formatting (line length 88, Black-compatible).
+- Ruff for linting and formatting: `uv run ruff check . && uv run ruff format .`
 - Pydantic models for all data crossing module boundaries.
 - `pathlib.Path` everywhere — never `os.path` or raw string paths.
-- All public functions need at minimum a one-line docstring.
 - IMPORTANT: Do not add or remove type annotations without an explicit instruction.
 
 ---
@@ -359,9 +357,3 @@ Extends global Do Not. Project-specific hard rules:
 
 ---
 
-## Project Imports
-
-@.claude/rules/code-style.md
-@.claude/rules/testing.md
-@.claude/rules/lancedb-best-practices.md
-@.claude/rues/repo-docs-best-practices.md
