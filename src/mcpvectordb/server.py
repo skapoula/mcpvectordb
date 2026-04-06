@@ -49,7 +49,8 @@ if settings.allowed_hosts_list:
     _scheme = "https" if settings.tls_enabled else "http"
     _transport_security = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
-        allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"] + settings.allowed_hosts_list,
+        allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"]
+        + settings.allowed_hosts_list,
         allowed_origins=[
             f"{_scheme}://127.0.0.1:*",
             f"{_scheme}://localhost:*",
@@ -316,9 +317,7 @@ async def list_documents(
     if offset < 0:
         return {"error": "offset must be non-negative", "status": "error"}
     try:
-        docs = await asyncio.to_thread(
-            _store.list_documents, library, limit, offset
-        )
+        docs = await asyncio.to_thread(_store.list_documents, library, limit, offset)
         return {"documents": docs, "count": len(docs)}
     except StoreError as e:
         return {"error": f"list_documents failed: {e}", "status": "error"}
@@ -426,7 +425,6 @@ async def server_info(check_path: str | None = None) -> dict:
         Dict with platform, cwd, python_version, lancedb_uri,
         fastembed_cache_path, transport, and optionally path_check.
     """
-    import os
 
     info: dict[str, Any] = {
         "platform": sys.platform,
@@ -450,8 +448,8 @@ async def server_info(check_path: str | None = None) -> dict:
         resolved = Path(check_path).expanduser().resolve()
         parent_exists = resolved.parent.exists()
         base: dict[str, Any] = {
-            "received": check_path,        # raw string the server got
-            "resolved": str(resolved),     # after expanduser + resolve
+            "received": check_path,  # raw string the server got
+            "resolved": str(resolved),  # after expanduser + resolve
             "parent_exists": parent_exists,
         }
         if resolved.exists():
@@ -692,7 +690,9 @@ def _validate_oauth_config() -> None:
         )
         return
     if not settings.oauth_client_id:
-        raise ConfigurationError("OAUTH_ENABLED=true requires OAUTH_CLIENT_ID to be set")
+        raise ConfigurationError(
+            "OAUTH_ENABLED=true requires OAUTH_CLIENT_ID to be set"
+        )
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -765,7 +765,9 @@ def main() -> None:
                 # Add _RequireGoogleAuth first (innermost) so it runs after
                 # AuthenticationMiddleware has populated scope["user"].
                 app.add_middleware(_RequireGoogleAuth)
-                app.add_middleware(AuthenticationMiddleware, backend=BearerAuthBackend(verifier))
+                app.add_middleware(
+                    AuthenticationMiddleware, backend=BearerAuthBackend(verifier)
+                )
 
             ssl_certfile: str | None = None
             ssl_keyfile: str | None = None
