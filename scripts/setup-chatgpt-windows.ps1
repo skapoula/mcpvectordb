@@ -57,6 +57,8 @@ Write-OK "uv $uvVersion found"
 
 # ── Step 2: Ensure Python 3.13 is available ───────────────────────────────────
 
+# onnxruntime (required by fastembed) does not yet publish wheels for Python 3.14+.
+# We pin to 3.13 explicitly so uv never picks a newer system Python by accident.
 Write-Step "Ensuring Python 3.13 is available via uv..."
 $py313Ok = $false
 try {
@@ -144,15 +146,23 @@ LOG_LEVEL=INFO
 
 # ── Step 7: Check port availability ───────────────────────────────────────────
 
-Write-Step "Checking port 8000..."
-$portInUse = netstat -ano | Select-String ":8000 "
+# Read MCP_PORT from .env if it already exists, otherwise default to 8000
+$McpPort = 8000
+if (Test-Path $EnvFile) {
+    $envLines = Get-Content $EnvFile -ErrorAction SilentlyContinue
+    $portLine = $envLines | Where-Object { $_ -match "^MCP_PORT\s*=\s*(\d+)" }
+    if ($portLine -and $Matches[1]) { $McpPort = [int]$Matches[1] }
+}
+
+Write-Step "Checking port $McpPort..."
+$portInUse = netstat -ano | Select-String "[:.]$McpPort\s"
 if ($portInUse) {
-    Write-Warn "Port 8000 is already in use. Set MCP_PORT to a free port in .env and re-run."
-    Write-Warn "Processes using port 8000:"
+    Write-Warn "Port $McpPort is already in use. Set MCP_PORT to a free port in .env and re-run."
+    Write-Warn "Processes using port ${McpPort}:"
     $portInUse | ForEach-Object { Write-Host "    $_" -ForegroundColor Yellow }
     exit 1
 }
-Write-OK "Port 8000 is free"
+Write-OK "Port $McpPort is free"
 
 # ── Step 8: Download NSSM ─────────────────────────────────────────────────────
 
@@ -181,7 +191,7 @@ if (Test-Path $NssmExe) {
     if (-not (Test-Path $NssmDir)) { New-Item -ItemType Directory -Path $NssmDir -Force | Out-Null }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zip = [System.IO.Compression.ZipFile]::OpenRead($NssmZip)
-    $entry = $zip.Entries | Where-Object { $_.FullName -eq "nssm-2.24/win64/nssm.exe" }
+    $entry = $zip.Entries | Where-Object { ($_.FullName -replace '\\', '/') -eq "nssm-2.24/win64/nssm.exe" }
     if (-not $entry) { $zip.Dispose(); Write-Fail "Could not find nssm.exe in zip archive" }
     [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $NssmExe, $true)
     $zip.Dispose()
@@ -201,9 +211,10 @@ $UvPath      = (Get-Command uv).Source
 $existingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($existingService) {
     Write-Warn "Service '$ServiceName' already exists — removing and reinstalling..."
-    & $NssmExe stop $ServiceName 2>$null
+    try { & $NssmExe stop $ServiceName 2>&1 | Out-Null } catch {}
     Start-Sleep -Seconds 2
     & $NssmExe remove $ServiceName confirm
+    if ($LASTEXITCODE -ne 0) { Write-Fail "Failed to remove existing service '$ServiceName'. Stop it manually and re-run." }
     Write-OK "Existing service removed"
 }
 
@@ -215,7 +226,7 @@ if ($LASTEXITCODE -ne 0) { Write-Fail "nssm install failed" }
 & $NssmExe set $ServiceName AppEnvironmentExtra `
     "MCP_TRANSPORT=sse" `
     "MCP_HOST=127.0.0.1" `
-    "MCP_PORT=8000" `
+    "MCP_PORT=$McpPort" `
     "LANCEDB_URI=$LanceDir" `
     "FASTEMBED_CACHE_PATH=$ModelsDir" `
     "LOG_LEVEL=INFO"
@@ -230,6 +241,7 @@ if ($LASTEXITCODE -ne 0) { Write-Fail "nssm install failed" }
 & $NssmExe set $ServiceName Start SERVICE_AUTO_START
 
 Write-OK "Service '$ServiceName' installed"
+Write-Warn "The service runs as SYSTEM. On domain-joined machines verify SYSTEM has read/write access to $DataDir"
 
 # ── Step 10: Start service ─────────────────────────────────────────────────────
 
@@ -252,7 +264,7 @@ Write-Host ""
 Write-Host "  Paste this URL into ChatGPT Desktop:" -ForegroundColor Yellow
 Write-Host "  Settings → Apps → Advanced settings → Developer mode" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "      http://127.0.0.1:8000/sse" -ForegroundColor White
+Write-Host "      http://127.0.0.1:${McpPort}/sse" -ForegroundColor White
 Write-Host ""
 Write-Host "  Then open a new ChatGPT conversation and ask:" -ForegroundColor Cyan
 Write-Host "      'List all libraries'" -ForegroundColor White
