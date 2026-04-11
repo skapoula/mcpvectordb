@@ -11,6 +11,8 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
 function Write-Step { param([string]$Message) Write-Host "`n>>> $Message" -ForegroundColor Cyan }
 function Write-OK   { param([string]$Message) Write-Host "    OK  $Message" -ForegroundColor Green }
 function Write-Warn { param([string]$Message) Write-Host "    WARN $Message" -ForegroundColor Yellow }
@@ -31,7 +33,8 @@ Write-OK "Running as Administrator"
 $NssmExe = Join-Path $PSScriptRoot "nssm\nssm.exe"
 if (-not (Test-Path $NssmExe)) {
     # Fall back to system PATH
-    $NssmExe = (Get-Command nssm -ErrorAction SilentlyContinue)?.Source
+    $nssmCmd = Get-Command nssm -ErrorAction SilentlyContinue
+    $NssmExe = if ($nssmCmd) { $nssmCmd.Source } else { $null }
     if (-not $NssmExe) { Write-Fail "nssm.exe not found. Run setup-chatgpt-windows.ps1 first." }
 }
 
