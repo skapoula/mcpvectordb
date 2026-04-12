@@ -251,29 +251,35 @@ if ($existingService) {
     Write-OK "Existing service removed"
 }
 
-# Build --envVars value: semicolons as delimiters; backslashes in paths must be escaped
+# Build --envVars value: semicolons as delimiters; backslashes in paths must be escaped.
 # servy-cli format: "VAR1=value1;VAR2=value2"
 # Backslashes in values must be doubled (\\) per servy-cli escaping rules.
 $LanceDirEsc  = $LanceDir  -replace '\\', '\\'
 $ModelsDirEsc = $ModelsDir -replace '\\', '\\'
 $EnvVars = "MCP_TRANSPORT=sse;MCP_HOST=127.0.0.1;MCP_PORT=$McpPort;LANCEDB_URI=$LanceDirEsc;FASTEMBED_CACHE_PATH=$ModelsDirEsc;LOG_LEVEL=INFO"
 
-# Install service — all config in one command, no post-install set calls needed
-& $ServyExe install `
-    --name=$ServiceName `
-    --displayName="mcpvectordb ChatGPT" `
-    --description="mcpvectordb MCP server (SSE transport) for ChatGPT Desktop" `
-    --path=$UvPath `
-    --params="run --directory `"$ProjectDir`" mcpvectordb" `
-    --startupDir=$ProjectDir `
-    --startupType=Automatic `
-    --stdout=$LogFile `
-    --stderr=$LogFile `
-    --enableRotation `
-    --enableSizeRotation `
-    --rotationSize=10 `
-    --maxRotations=5 `
+# Build argument list as an array so PowerShell does not tokenise on semicolons inside $EnvVars.
+# Passing "--envVars=$EnvVars" as a single quoted string causes PowerShell to split on ';'.
+# Using an array and the call operator (&) passes each element as one argument to the process.
+$installArgs = @(
+    "install",
+    "--name=$ServiceName",
+    "--displayName=mcpvectordb ChatGPT",
+    "--description=mcpvectordb MCP server (SSE transport) for ChatGPT Desktop",
+    "--path=$UvPath",
+    "--params=run --directory `"$ProjectDir`" mcpvectordb",
+    "--startupDir=$ProjectDir",
+    "--startupType=Automatic",
+    "--stdout=$LogFile",
+    "--stderr=$LogFile",
+    "--enableRotation",
+    "--enableSizeRotation",
+    "--rotationSize=10",
+    "--maxRotations=5",
     "--envVars=$EnvVars"
+)
+
+& $ServyExe @installArgs
 
 if ($LASTEXITCODE -ne 0) { Write-Fail "servy-cli install failed" }
 
