@@ -259,24 +259,24 @@ $ModelsDirEsc = $ModelsDir -replace '\\', '\\'
 $EnvVars = "MCP_TRANSPORT=sse;MCP_HOST=127.0.0.1;MCP_PORT=$McpPort;LANCEDB_URI=$LanceDirEsc;FASTEMBED_CACHE_PATH=$ModelsDirEsc;LOG_LEVEL=INFO"
 
 # Build argument list as an array so PowerShell does not tokenise on semicolons inside $EnvVars.
-# Passing "--envVars=$EnvVars" as a single quoted string causes PowerShell to split on ';'.
-# Using an array and the call operator (&) passes each element as one argument to the process.
+# Each array element becomes exactly one argument passed to the process.
+# Flag and value are kept as a single "flag=value" element; servy-cli accepts both --flag=val and --flag val.
+$UvParams = "run --directory `"$ProjectDir`" mcpvectordb"
 $installArgs = @(
     "install",
-    "--name=$ServiceName",
-    "--displayName=mcpvectordb ChatGPT",
-    "--description=mcpvectordb MCP server (SSE transport) for ChatGPT Desktop",
-    "--path=$UvPath",
-    "--params=run --directory `"$ProjectDir`" mcpvectordb",
-    "--startupDir=$ProjectDir",
-    "--startupType=Automatic",
-    "--stdout=$LogFile",
-    "--stderr=$LogFile",
-    "--enableRotation",
+    "--name", $ServiceName,
+    "--displayName", "mcpvectordb ChatGPT",
+    "--description", "mcpvectordb MCP server (SSE transport) for ChatGPT Desktop",
+    "--path", $UvPath,
+    "--params", $UvParams,
+    "--startupDir", $ProjectDir,
+    "--startupType", "Automatic",
+    "--stdout", $LogFile,
+    "--stderr", $LogFile,
     "--enableSizeRotation",
-    "--rotationSize=10",
-    "--maxRotations=5",
-    "--env=$EnvVars"
+    "--rotationSize", "10",
+    "--maxRotations", "5",
+    "--env", $EnvVars
 )
 
 & $ServyExe @installArgs
