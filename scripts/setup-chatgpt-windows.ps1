@@ -164,74 +164,72 @@ if ($portInUse) {
 }
 Write-OK "Port $McpPort is free"
 
-# ── Step 8: Download servy-cli (Windows service manager) ─────────────────────
+# ── Step 8: Locate or install servy-cli (Windows service manager) ────────────
 #
-# servy-cli is a modern NSSM alternative hosted on GitHub Releases.
-# We use the net48 portable build — it requires only .NET Framework 4.8, which
-# ships with every Windows 10/11 installation (no extra runtime needed).
+# servy-cli is a modern NSSM alternative. We use the net48 installer — it
+# requires only .NET Framework 4.8, which ships with every Windows 10/11
+# installation. The installer is a standard Inno Setup exe that accepts /SILENT.
 
-Write-Step "Downloading servy-cli (Windows service manager)..."
+Write-Step "Locating servy-cli (Windows service manager)..."
 
-$ServyDir = Join-Path $PSScriptRoot "servy"
-$ServyExe = Join-Path $ServyDir "servy-cli.exe"
+# Helper: find servy-cli.exe on PATH or in common install locations
+function Find-ServyCli {
+    $cmd = Get-Command servy-cli -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    $candidates = @(
+        "$env:ProgramFiles\Servy\servy-cli.exe",
+        "$env:ProgramFiles\servy\servy-cli.exe",
+        "${env:ProgramFiles(x86)}\Servy\servy-cli.exe"
+    )
+    foreach ($c in $candidates) { if (Test-Path $c) { return $c } }
+    return $null
+}
 
-# servy-cli release coordinates
-$ServyVersion = "7.8"
-$ServyZipName = "servy-$ServyVersion-net48-x64-portable.7z"
-$ServyUrl     = "https://github.com/aelassas/servy/releases/download/v$ServyVersion/$ServyZipName"
-$ServyZip     = Join-Path $env:TEMP $ServyZipName
+$ServyExe = Find-ServyCli
 
-if (Test-Path $ServyExe) {
-    Write-OK "servy-cli already present at $ServyExe"
+if ($ServyExe) {
+    Write-OK "servy-cli found at $ServyExe"
 } else {
-    # Download
+    # Download and run the net48 installer silently
+    $ServyVersion     = "7.8"
+    $ServyInstaller   = "servy-$ServyVersion-net48-x64-installer.exe"
+    $ServyInstallerUrl = "https://github.com/aelassas/servy/releases/download/v$ServyVersion/$ServyInstaller"
+    $ServyInstallerPath = Join-Path $env:TEMP $ServyInstaller
+
     try {
-        Write-Host "    Downloading from $ServyUrl ..." -ForegroundColor Yellow
-        Invoke-WebRequest -Uri $ServyUrl -OutFile $ServyZip -UseBasicParsing -TimeoutSec 60
+        Write-Host "    Downloading installer from $ServyInstallerUrl ..." -ForegroundColor Yellow
+        Invoke-WebRequest -Uri $ServyInstallerUrl -OutFile $ServyInstallerPath -UseBasicParsing -TimeoutSec 60
         Write-OK "Download complete"
     } catch {
         Write-Host ""
         Write-Host "  servy-cli download failed: $_" -ForegroundColor Red
         Write-Host ""
-        Write-Host "  Download manually:" -ForegroundColor Yellow
-        Write-Host "    1. Open https://github.com/aelassas/servy/releases/latest in your browser"
-        Write-Host "    2. Download:  $ServyZipName"
-        Write-Host "    3. Extract servy-cli.exe from the archive"
-        Write-Host "    4. Copy servy-cli.exe to:  $ServyExe"
-        Write-Host "    5. Re-run this script"
-        Write-Host ""
-        Write-Host "  Or install via winget and then copy the binary:" -ForegroundColor Yellow
-        Write-Host "      winget install servy"
+        Write-Host "  Install manually — choose one option:" -ForegroundColor Yellow
+        Write-Host "    A) winget:  winget install servy"
+        Write-Host "    B) Browser: https://github.com/aelassas/servy/releases/latest"
+        Write-Host "               Download $ServyInstaller and run it"
+        Write-Host "  Then re-run this script."
         Write-Host ""
         exit 1
     }
 
-    # Extract servy-cli.exe using 7-Zip if available, otherwise shell extraction
-    if (-not (Test-Path $ServyDir)) { New-Item -ItemType Directory -Path $ServyDir -Force | Out-Null }
+    Write-Host "    Running installer silently..." -ForegroundColor Yellow
+    $proc = Start-Process -FilePath $ServyInstallerPath -ArgumentList "/SILENT" -Wait -PassThru
+    Remove-Item $ServyInstallerPath -Force -ErrorAction SilentlyContinue
 
-    $sevenZip = Get-Command 7z -ErrorAction SilentlyContinue
-    if ($sevenZip) {
-        & 7z e $ServyZip "servy-cli.exe" -o"$ServyDir" -y | Out-Null
-    } else {
-        # Fall back to Windows built-in tar (available on Windows 10 1803+)
-        try {
-            tar -xf $ServyZip -C $ServyDir "servy-cli.exe" 2>&1 | Out-Null
-        } catch {
-            Write-Host ""
-            Write-Host "  Cannot extract $ServyZipName automatically (no 7-Zip or tar available)." -ForegroundColor Red
-            Write-Host "  Install 7-Zip (https://7-zip.org) then re-run, or extract manually:" -ForegroundColor Yellow
-            Write-Host "    1. Open $ServyZip with 7-Zip"
-            Write-Host "    2. Extract servy-cli.exe to: $ServyDir"
-            Write-Host "    3. Re-run this script"
-            Write-Host ""
-            exit 1
-        }
+    if ($proc.ExitCode -ne 0) {
+        Write-Fail "servy installer exited with code $($proc.ExitCode). Try running it manually."
     }
 
-    Remove-Item $ServyZip -Force -ErrorAction SilentlyContinue
+    # Refresh PATH so newly installed servy-cli is visible in this session
+    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
+                [System.Environment]::GetEnvironmentVariable("PATH", "User")
 
-    if (-not (Test-Path $ServyExe)) { Write-Fail "servy-cli.exe not found after extraction — check the archive contents." }
-    Write-OK "servy-cli extracted to $ServyExe"
+    $ServyExe = Find-ServyCli
+    if (-not $ServyExe) {
+        Write-Fail "servy-cli.exe not found after installation. Try opening a new Administrator PowerShell and re-running."
+    }
+    Write-OK "servy-cli installed at $ServyExe"
 }
 
 # ── Step 9: Install Windows service ───────────────────────────────────────────
