@@ -276,7 +276,7 @@ $installArgs = @(
     "--enableSizeRotation",
     "--rotationSize=10",
     "--maxRotations=5",
-    "--envVars=$EnvVars"
+    "--env=$EnvVars"
 )
 
 & $ServyExe @installArgs
