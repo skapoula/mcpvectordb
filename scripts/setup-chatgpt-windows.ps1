@@ -95,7 +95,10 @@ else { Write-OK "Embedding model ready" }
 
 Write-Step "Creating data directories..."
 
-$DataDir   = Join-Path $env:LOCALAPPDATA "mcpvectordb"
+# Use ProgramData (C:\ProgramData\mcpvectordb) so the SYSTEM account that runs
+# the Windows service can read the LanceDB index and the embedding model cache.
+# LOCALAPPDATA is user-specific and not accessible to SYSTEM.
+$DataDir   = Join-Path $env:ProgramData "mcpvectordb"
 $LanceDir  = Join-Path $DataDir "lancedb"
 $ModelsDir = Join-Path $DataDir "models"
 $LogFile   = Join-Path $DataDir "chatgpt-service.log"
