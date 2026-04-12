@@ -28,14 +28,14 @@ if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adm
 }
 Write-OK "Running as Administrator"
 
-# ── Locate NSSM ───────────────────────────────────────────────────────────────
+# ── Locate servy-cli ──────────────────────────────────────────────────────────
 
-$NssmExe = Join-Path $PSScriptRoot "nssm\nssm.exe"
-if (-not (Test-Path $NssmExe)) {
-    # Fall back to system PATH
-    $nssmCmd = Get-Command nssm -ErrorAction SilentlyContinue
-    $NssmExe = if ($nssmCmd) { $nssmCmd.Source } else { $null }
-    if (-not $NssmExe) { Write-Fail "nssm.exe not found. Run setup-chatgpt-windows.ps1 first." }
+$ServyExe = Join-Path $PSScriptRoot "servy\servy-cli.exe"
+if (-not (Test-Path $ServyExe)) {
+    # Fall back to system PATH (winget/choco install puts it there)
+    $servyCmd = Get-Command servy-cli -ErrorAction SilentlyContinue
+    $ServyExe = if ($servyCmd) { $servyCmd.Source } else { $null }
+    if (-not $ServyExe) { Write-Fail "servy-cli.exe not found. Run setup-chatgpt-windows.ps1 first." }
 }
 
 # ── Stop and remove service ────────────────────────────────────────────────────
@@ -47,9 +47,9 @@ $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if (-not $svc) {
     Write-Warn "Service '$ServiceName' not found — nothing to remove."
 } else {
-    try { & $NssmExe stop $ServiceName 2>&1 | Out-Null } catch {}
+    try { & $ServyExe stop --name=$ServiceName 2>&1 | Out-Null } catch {}
     Start-Sleep -Seconds 2
-    & $NssmExe remove $ServiceName confirm
+    & $ServyExe uninstall --name=$ServiceName
     if ($LASTEXITCODE -ne 0) { Write-Fail "Failed to remove service '$ServiceName'." }
     Write-OK "Service '$ServiceName' removed"
 }
