@@ -32,6 +32,9 @@ htmlcov/
 lancedb/
 ~/.mcpvectordb/
 
+# CodeGraphContext — per-repo KuzuDB index
+.codegraph
+
 # Personal Claude overrides
 CLAUDE.local.md
 
