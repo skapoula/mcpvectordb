@@ -54,3 +54,6 @@ build/              # PyInstaller work directory
 
 # macOS
 .DS_Store
+
+# CodeGraphContext per-repo KuzuDB graph (large binary, rebuildable)
+.codegraphcontext/
