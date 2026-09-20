@@ -33,7 +33,7 @@ packages = ["src/mcpvectordb"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
-addopts = "-m 'not slow'"
+addopts = "-m 'not slow' --cov=src/mcpvectordb --cov-report=term-missing --cov-fail-under=80"
 markers = [
     "slow: audio transcription, image OCR, embedding model load (deselected by default)",
     "integration: writes to real (tmp) LanceDB on disk",
@@ -44,7 +44,19 @@ markers = [
 line-length = 88
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+# ANN = type hints on public signatures; D1xx/D4xx = docstrings on public API.
+# Both are required by /workspace/.claude/rules/master-code-style.md — selected here
+# so the rule is enforced by the linter, not only asserted in prose.
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "ANN", "D100", "D101", "D102", "D103", "D104", "D400", "D415"]
+# ANN401: bans typing.Any outright. The style rule requires annotations, not the
+# absence of Any, so this stays off.
+ignore = ["ANN401"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN", "D"]
 
 [tool.mypy]
 python_version = "3.11"
