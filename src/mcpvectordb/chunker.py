@@ -15,6 +15,11 @@ _tokenizer: "PreTrainedTokenizerBase | None" = None
 # Separator hierarchy for recursive splitting
 _SEPARATORS = ["\n\n", "\n", " ", ""]
 
+# The HuggingFace Hub model ID for the tokenizer.
+# settings.embedding_model is the fastembed short name ("nomic-embed-text-v1.5");
+# the HuggingFace Hub requires the full org-prefixed ID.
+_HF_TOKENIZER_ID = "nomic-ai/nomic-embed-text-v1.5"
+
 
 def _get_tokenizer() -> "PreTrainedTokenizerBase":
     """Return the tokenizer singleton, loading it on first call.
