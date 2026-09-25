@@ -87,9 +87,11 @@ mcpvectordb/
 ├── docs/
 │   ├── mcp-tool-spec.md       # Tool names, input schemas, return schemas — source of truth
 │   ├── windows-setup.md       # Windows-specific installation and configuration guidance
+│   ├── linux-setup.md         # Native Linux: stdio, standalone binary, systemd user service
 │   └── e2e-test-cases.md      # Integration test scenarios
 ├── examples/
 │   └── sample_docs/           # Small fixture files, one per supported format
+├── scripts/                   # Host setup: *-windows.ps1 (PowerShell), *-linux.sh (bash)
 ├── deploy/
 │   └── k3s/
 │       ├── deployment.yaml    # k3s Deployment for SSE transport
