@@ -166,7 +166,6 @@ async def ingest(
     """
     is_url = isinstance(source, str) and source.startswith(("http://", "https://"))
     source_str = str(source)
-    meta_json = json.dumps(metadata or {})
 
     # ── 1. Fetch raw bytes ─────────────────────────────────────────────────────
     if is_url:
@@ -177,11 +176,9 @@ async def ingest(
         try:
             raw_bytes = await asyncio.to_thread(path.read_bytes)
         except OSError as e:
-            import os
-
             raise IngestionError(
                 f"Cannot read file {source_str!r} "
-                f"(server cwd: {os.getcwd()!r}). "
+                f"(server cwd: {str(Path.cwd())!r}). "
                 "Use server_info(check_path=...) to verify the path is reachable."
             ) from e
         file_type = path.suffix.lstrip(".").lower() or "unknown"
@@ -191,28 +188,11 @@ async def ingest(
         except OSError:
             last_modified = ""
 
-    # ── 2. Dedup check ─────────────────────────────────────────────────────────
+    # ── 2. Dedup check (before the expensive conversion) ───────────────────────
     new_hash = hashlib.sha256(raw_bytes).hexdigest()
-    existing_doc_id, existing_hash = await asyncio.to_thread(
-        store.find_existing, source_str, library
-    )
-
-    if existing_hash == new_hash:
-        logger.info(
-            "Skipping %s — content unchanged (hash=%s)", source_str, new_hash[:8]
-        )
-        return IngestResult(
-            status="skipped",
-            doc_id=existing_doc_id or "",
-            source=source_str,
-            library=library,
-            chunk_count=0,
-        )
-
-    if existing_doc_id is not None:
-        ingest_status = "replaced"
-    else:
-        ingest_status = "indexed"
+    skipped, existing_doc_id = await _dedup(store, source_str, library, new_hash)
+    if skipped:
+        return skipped
 
     # ── 3. Convert to Markdown ─────────────────────────────────────────────────
     if is_url:
@@ -232,84 +212,16 @@ async def ingest(
             "Try ingest_content to pass the text directly."
         )
 
-    title = _extract_title(text, source_str)
-
-    # ── 4. Chunk ───────────────────────────────────────────────────────────────
-    try:
-        chunks = await asyncio.to_thread(chunk, text)
-    except Exception as e:
-        raise IngestionError(f"Chunking failed for {source_str!r}") from e
-
-    if not chunks:
-        raise IngestionError(f"No usable chunks produced from {source_str!r}")
-
-    # ── 5. Embed ───────────────────────────────────────────────────────────────
-    try:
-        embeddings = await asyncio.to_thread(get_embedder().embed_documents, chunks)
-    except Exception as e:
-        raise IngestionError(f"Embedding failed for {source_str!r}") from e
-
-    # ── 6. Build records and store ─────────────────────────────────────────────
-    doc_id = str(uuid.uuid4())
-    now = datetime.now(UTC).isoformat()
-
-    records = [
-        ChunkRecord(
-            id=str(uuid.uuid4()),
-            doc_id=doc_id,
-            library=library,
-            source=source_str,
-            content_hash=new_hash,
-            title=title,
-            content=chunk_text,
-            embedding=embeddings[i].tolist(),
-            chunk_index=i,
-            created_at=now,
-            metadata=meta_json,
-            file_type=file_type,
-            last_modified=last_modified,
-            page=0,
-        )
-        for i, chunk_text in enumerate(chunks)
-    ]
-
-    try:
-        await asyncio.to_thread(store.upsert_chunks, records)
-    except Exception as e:
-        raise IngestionError(f"Store write failed for {source_str!r}") from e
-
-    # ── 7. Delete old version only after new write succeeds ────────────────────
-    if ingest_status == "replaced" and existing_doc_id is not None:
-        logger.info(
-            "Replacing %s in library %r — deleting old doc_id=%s",
-            source_str,
-            library,
-            existing_doc_id,
-        )
-        try:
-            await asyncio.to_thread(store.delete_document, existing_doc_id)
-        except Exception:
-            logger.warning(
-                "New version of %s written (doc_id=%s) but old doc_id=%s could not be deleted — index may contain duplicates",
-                source_str,
-                doc_id,
-                existing_doc_id,
-            )
-
-    logger.info(
-        "%s %s → %d chunks in library %r (doc_id=%s)",
-        ingest_status,
-        source_str,
-        len(records),
-        library,
-        doc_id,
-    )
-    return IngestResult(
-        status=ingest_status,
-        doc_id=doc_id,
-        source=source_str,
+    return await _index_text(
+        text=text,
+        source_str=source_str,
         library=library,
-        chunk_count=len(records),
+        metadata=metadata,
+        content_hash=new_hash,
+        existing_doc_id=existing_doc_id,
+        file_type=file_type,
+        last_modified=last_modified,
+        store=store,
     )
 
 
@@ -340,31 +252,10 @@ async def ingest_content(
         IngestionError: If chunking, embedding, or storing fails.
     """
     source_str = source.strip() or "uploaded-content"
-    meta_json = json.dumps(metadata or {})
-    raw_bytes = content.encode()
-
-    # ── 1. Dedup check ─────────────────────────────────────────────────────────
-    new_hash = hashlib.sha256(raw_bytes).hexdigest()
-    existing_doc_id, existing_hash = await asyncio.to_thread(
-        store.find_existing, source_str, library
-    )
-
-    if existing_hash == new_hash:
-        logger.info(
-            "Skipping %s — content unchanged (hash=%s)", source_str, new_hash[:8]
-        )
-        return IngestResult(
-            status="skipped",
-            doc_id=existing_doc_id or "",
-            source=source_str,
-            library=library,
-            chunk_count=0,
-        )
-
-    if existing_doc_id is not None:
-        ingest_status = "replaced"
-    else:
-        ingest_status = "indexed"
+    new_hash = hashlib.sha256(content.encode()).hexdigest()
+    skipped, existing_doc_id = await _dedup(store, source_str, library, new_hash)
+    if skipped:
+        return skipped
 
     if not content.strip():
         raise IngestionError(
@@ -372,36 +263,76 @@ async def ingest_content(
             "Pass non-empty Markdown or plain text."
         )
 
-    title = _extract_title(content, source_str)
-    _raw_ext = source_str.rsplit(".", 1)[-1].lower() if "." in source_str else ""
-    file_type = _raw_ext if f".{_raw_ext}" in SUPPORTED_EXTENSIONS else "text"
-    now = datetime.now(UTC).isoformat()
+    raw_ext = source_str.rsplit(".", 1)[-1].lower() if "." in source_str else ""
+    return await _index_text(
+        text=content,
+        source_str=source_str,
+        library=library,
+        metadata=metadata,
+        content_hash=new_hash,
+        existing_doc_id=existing_doc_id,
+        file_type=raw_ext if f".{raw_ext}" in SUPPORTED_EXTENSIONS else "text",
+        last_modified=datetime.now(UTC).isoformat(),
+        store=store,
+    )
 
-    # ── 2. Chunk ───────────────────────────────────────────────────────────────
+
+async def _dedup(
+    store: Store, source_str: str, library: str, new_hash: str
+) -> tuple[IngestResult | None, str | None]:
+    """Return (skipped result, None) if unchanged, else (None, existing doc_id)."""
+    existing_doc_id, existing_hash = await asyncio.to_thread(
+        store.find_existing, source_str, library
+    )
+    if existing_hash != new_hash:
+        return None, existing_doc_id
+    logger.info("Skipping %s — content unchanged (hash=%s)", source_str, new_hash[:8])
+    skipped = IngestResult(
+        status="skipped",
+        doc_id=existing_doc_id or "",
+        source=source_str,
+        library=library,
+        chunk_count=0,
+    )
+    return skipped, existing_doc_id
+
+
+async def _index_text(
+    *,
+    text: str,
+    source_str: str,
+    library: str,
+    metadata: dict | None,
+    content_hash: str,
+    existing_doc_id: str | None,
+    file_type: str,
+    last_modified: str,
+    store: Store,
+) -> IngestResult:
+    """Chunk, embed and store *text*, then delete the version it replaces."""
+    title = _extract_title(text, source_str)
     try:
-        chunks = await asyncio.to_thread(chunk, content)
+        chunks = await asyncio.to_thread(chunk, text)
     except Exception as e:
         raise IngestionError(f"Chunking failed for {source_str!r}") from e
-
     if not chunks:
         raise IngestionError(f"No usable chunks produced from {source_str!r}")
 
-    # ── 3. Embed ───────────────────────────────────────────────────────────────
     try:
         embeddings = await asyncio.to_thread(get_embedder().embed_documents, chunks)
     except Exception as e:
         raise IngestionError(f"Embedding failed for {source_str!r}") from e
 
-    # ── 4. Build records and store ─────────────────────────────────────────────
     doc_id = str(uuid.uuid4())
-
+    now = datetime.now(UTC).isoformat()
+    meta_json = json.dumps(metadata or {})
     records = [
         ChunkRecord(
             id=str(uuid.uuid4()),
             doc_id=doc_id,
             library=library,
             source=source_str,
-            content_hash=new_hash,
+            content_hash=content_hash,
             title=title,
             content=chunk_text,
             embedding=embeddings[i].tolist(),
@@ -409,19 +340,19 @@ async def ingest_content(
             created_at=now,
             metadata=meta_json,
             file_type=file_type,
-            last_modified=now,
+            last_modified=last_modified,
             page=0,
         )
         for i, chunk_text in enumerate(chunks)
     ]
-
     try:
         await asyncio.to_thread(store.upsert_chunks, records)
     except Exception as e:
         raise IngestionError(f"Store write failed for {source_str!r}") from e
 
-    # ── 5. Delete old version only after new write succeeds ────────────────────
-    if ingest_status == "replaced" and existing_doc_id is not None:
+    # Delete the old version only after the new write succeeded.
+    status = "replaced" if existing_doc_id is not None else "indexed"
+    if existing_doc_id is not None:
         logger.info(
             "Replacing %s in library %r — deleting old doc_id=%s",
             source_str,
@@ -432,7 +363,8 @@ async def ingest_content(
             await asyncio.to_thread(store.delete_document, existing_doc_id)
         except Exception:
             logger.warning(
-                "New version of %s written (doc_id=%s) but old doc_id=%s could not be deleted — index may contain duplicates",
+                "New version of %s written (doc_id=%s) but old doc_id=%s could not "
+                "be deleted — index may contain duplicates",
                 source_str,
                 doc_id,
                 existing_doc_id,
@@ -440,14 +372,14 @@ async def ingest_content(
 
     logger.info(
         "%s %s → %d chunks in library %r (doc_id=%s)",
-        ingest_status,
+        status,
         source_str,
         len(records),
         library,
         doc_id,
     )
     return IngestResult(
-        status=ingest_status,
+        status=status,
         doc_id=doc_id,
         source=source_str,
         library=library,
