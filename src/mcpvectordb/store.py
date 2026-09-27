@@ -121,7 +121,7 @@ def _ensure_scalar_indexes(table: lancedb.table.Table) -> None:
             table.create_scalar_index(col, replace=True)
         except Exception as e:
             logger.warning(
-                "Scalar index on %r not created (table may be empty — will retry on next write): %s",
+                "Scalar index on %r not created (filters still work, unindexed): %s",
                 col,
                 e,
             )
@@ -147,7 +147,7 @@ def _ensure_fts_index(table: lancedb.table.Table) -> None:
 
 
 def _validate_embedding_dimension(table: lancedb.table.Table) -> None:
-    """Raise StoreError if the table's embedding column dimension doesn't match settings.
+    """Raise StoreError if the stored embedding dimension differs from settings.
 
     Args:
         table: Open LanceDB table to validate.
@@ -366,7 +366,7 @@ class Store:
             before = table.count_rows()
             table.delete(f"doc_id = '{safe_id}'")
             after = table.count_rows()
-            deleted = before - after
+            deleted = int(before - after)
             logger.info("Deleted %d chunks for doc_id=%s", deleted, doc_id)
             return deleted
         except Exception as e:
@@ -393,7 +393,9 @@ class Store:
         q = table.search(np.array(embedding, dtype=np.float32))
         if where is not None:
             q = q.where(where)
-        return q.refine_factor(settings.search_refine_factor).limit(top_k).to_list()
+        return list(
+            q.refine_factor(settings.search_refine_factor).limit(top_k).to_list()
+        )
 
     def search(
         self,

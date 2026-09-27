@@ -48,7 +48,7 @@ class TestDefaultDataDir:
 
 
 class TestSettingsDefaults:
-    """Tests that Settings fields declare the platform-aware helpers as their defaults."""
+    """Settings fields use the platform-aware helpers as their defaults."""
 
     @pytest.mark.unit
     def test_lancedb_uri_field_uses_default_factory(self):
@@ -60,7 +60,7 @@ class TestSettingsDefaults:
 
     @pytest.mark.unit
     def test_fastembed_cache_path_field_uses_default_factory(self):
-        """Settings.fastembed_cache_path has default_factory set to _default_model_cache."""
+        """Settings.fastembed_cache_path defaults via _default_model_cache."""
         from mcpvectordb.config import Settings, _default_model_cache
 
         field = Settings.model_fields["fastembed_cache_path"]

@@ -445,7 +445,7 @@ class TestIngestFileErrorPaths:
     def test_conversion_general_error_becomes_ingestion_error(
         self, tmp_path, store, mock_embedder, monkeypatch
     ):
-        """A RuntimeError from convert() is wrapped in IngestionError (lines 108-109)."""
+        """A RuntimeError from convert() is wrapped in IngestionError."""
         f = tmp_path / "doc.pdf"
         f.write_bytes(b"%PDF content")
 
@@ -461,7 +461,7 @@ class TestIngestFileErrorPaths:
     def test_chunker_error_becomes_ingestion_error(
         self, tmp_path, store, mock_embedder, _patch_converter, monkeypatch
     ):
-        """A RuntimeError from chunk() is wrapped in IngestionError (lines 116-117)."""
+        """A RuntimeError from chunk() is wrapped in IngestionError."""
         f = tmp_path / "doc.pdf"
         f.write_bytes(b"%PDF content")
 
@@ -477,7 +477,7 @@ class TestIngestFileErrorPaths:
     def test_empty_chunks_raises_ingestion_error(
         self, tmp_path, store, mock_embedder, _patch_converter, monkeypatch
     ):
-        """Empty chunk list raises IngestionError (line 120)."""
+        """Empty chunk list raises IngestionError."""
         f = tmp_path / "doc.pdf"
         f.write_bytes(b"%PDF content")
 
@@ -490,7 +490,7 @@ class TestIngestFileErrorPaths:
     def test_embedding_error_becomes_ingestion_error(
         self, tmp_path, store, _patch_converter, _patch_chunker, monkeypatch
     ):
-        """An exception from embed_documents() is wrapped in IngestionError (lines 125-126)."""
+        """An exception from embed_documents() is wrapped in IngestionError."""
         from unittest.mock import MagicMock
 
         f = tmp_path / "doc.pdf"
@@ -507,7 +507,7 @@ class TestIngestFileErrorPaths:
     def test_store_write_error_becomes_ingestion_error(
         self, tmp_path, _patch_converter, _patch_chunker, monkeypatch
     ):
-        """A RuntimeError from store.upsert_chunks() is wrapped in IngestionError (lines 151-152)."""
+        """A RuntimeError from store.upsert_chunks() is wrapped in IngestionError."""
         from unittest.mock import MagicMock
 
         f = tmp_path / "doc.pdf"
@@ -538,7 +538,7 @@ class TestIngestHelpers:
 
     @pytest.mark.unit
     def test_extract_title_falls_back_to_source_filename(self):
-        """_extract_title returns the last path component when no heading is found (line 250)."""
+        """_extract_title returns the last path component when no heading is found."""
         from mcpvectordb.ingestor import _extract_title
 
         result = _extract_title(
@@ -551,7 +551,7 @@ class TestIngestHelpers:
     def test_convert_html_bytes_raises_ingestion_error_on_markitdown_failure(
         self, monkeypatch
     ):
-        """IngestionError is raised when MarkItDown fails in _convert_html_bytes (lines 231-232)."""
+        """IngestionError is raised when MarkItDown fails in _convert_html_bytes."""
         from unittest.mock import MagicMock
 
         import markitdown
@@ -676,7 +676,7 @@ class TestIngestFolder:
     async def test_ingest_folder_one_failure_does_not_stop_batch(
         self, tmp_path, store, monkeypatch
     ):
-        """Monkeypatch ingest to raise on one path; assert failed=1 and others indexed."""
+        """One file raising yields failed=1 while the others are indexed."""
         (tmp_path / "good.pdf").write_bytes(b"%PDF good")
         (tmp_path / "bad.pdf").write_bytes(b"%PDF bad")
         (tmp_path / "also_good.txt").write_text("text content")

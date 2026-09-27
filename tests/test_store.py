@@ -368,7 +368,7 @@ class TestListDocuments:
 
     @pytest.mark.integration
     def test_list_documents_filtered_by_library(self, store):
-        """list_documents with library filter returns only docs from that library (lines 263-264)."""
+        """list_documents with library filter returns only docs from that library."""
         doc_a = str(uuid.uuid4())
         doc_b = str(uuid.uuid4())
         store.upsert_chunks([_make_chunk(doc_id=doc_a, library="lib_x", chunk_index=0)])
@@ -386,7 +386,7 @@ class TestStoreErrors:
 
     @pytest.mark.unit
     def test_open_table_raises_store_error_on_connect_failure(self, monkeypatch):
-        """_open_table raises StoreError when lancedb.connect fails (lines 73-74)."""
+        """_open_table raises StoreError when lancedb.connect fails."""
         from unittest.mock import MagicMock
 
         import lancedb
@@ -403,7 +403,7 @@ class TestStoreErrors:
 
     @pytest.mark.unit
     def test_upsert_chunks_raises_store_error(self, store, monkeypatch):
-        """upsert_chunks raises StoreError when the LanceDB write fails (lines 119-120)."""
+        """upsert_chunks raises StoreError when the LanceDB write fails."""
         from unittest.mock import MagicMock
 
         from mcpvectordb.exceptions import StoreError
@@ -417,7 +417,7 @@ class TestStoreErrors:
 
     @pytest.mark.unit
     def test_find_existing_raises_store_error(self, store, monkeypatch):
-        """find_existing raises StoreError on LanceDB failure (lines 150-151)."""
+        """find_existing raises StoreError on LanceDB failure."""
         from unittest.mock import MagicMock
 
         from mcpvectordb.exceptions import StoreError
@@ -431,7 +431,7 @@ class TestStoreErrors:
 
     @pytest.mark.unit
     def test_delete_document_raises_store_error(self, store, monkeypatch):
-        """delete_document raises StoreError on LanceDB failure (lines 174-175)."""
+        """delete_document raises StoreError on LanceDB failure."""
         from unittest.mock import MagicMock
 
         from mcpvectordb.exceptions import StoreError
@@ -445,7 +445,7 @@ class TestStoreErrors:
 
     @pytest.mark.unit
     def test_search_raises_store_error(self, store, monkeypatch):
-        """search raises StoreError on LanceDB failure (lines 211-212)."""
+        """search raises StoreError on LanceDB failure."""
         from unittest.mock import MagicMock
 
         from mcpvectordb.exceptions import StoreError
@@ -465,7 +465,7 @@ class TestStoreErrors:
 
     @pytest.mark.unit
     def test_get_document_raises_store_error(self, store, monkeypatch):
-        """get_document raises StoreError on LanceDB failure (lines 236-237)."""
+        """get_document raises StoreError on LanceDB failure."""
         from unittest.mock import MagicMock
 
         from mcpvectordb.exceptions import StoreError
@@ -479,7 +479,7 @@ class TestStoreErrors:
 
     @pytest.mark.unit
     def test_list_documents_raises_store_error(self, store, monkeypatch):
-        """list_documents raises StoreError on LanceDB failure (lines 287-288)."""
+        """list_documents raises StoreError on LanceDB failure."""
         from unittest.mock import MagicMock
 
         from mcpvectordb.exceptions import StoreError
@@ -493,7 +493,7 @@ class TestStoreErrors:
 
     @pytest.mark.unit
     def test_list_libraries_raises_store_error(self, store, monkeypatch):
-        """list_libraries raises StoreError on LanceDB failure (lines 326-327)."""
+        """list_libraries raises StoreError on LanceDB failure."""
         from unittest.mock import MagicMock
 
         from mcpvectordb.exceptions import StoreError

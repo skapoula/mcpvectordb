@@ -94,7 +94,7 @@ class TestIngestFileTool:
     def test_ingest_file_ingestion_error_returns_error_dict(
         self, tmp_path, monkeypatch
     ):
-        """IngestionError from the pipeline returns a structured error dict (lines 64-65)."""
+        """IngestionError from the pipeline returns a structured error dict."""
         from mcpvectordb import server
         from mcpvectordb.exceptions import IngestionError
 
@@ -114,7 +114,7 @@ class TestIngestFileTool:
     def test_ingest_file_unexpected_exception_returns_error_dict(
         self, tmp_path, monkeypatch
     ):
-        """Unexpected exception returns a structured error dict (lines 66-68)."""
+        """Unexpected exception returns a structured error dict."""
         from mcpvectordb import server
 
         async def _raise(*args, **kwargs):
@@ -196,7 +196,7 @@ class TestIngestUrlTool:
 
     @pytest.mark.unit
     def test_ingest_url_unexpected_exception_returns_error_dict(self, monkeypatch):
-        """Unexpected exception in ingest_url returns a structured error dict (lines 103-105)."""
+        """Unexpected exception in ingest_url returns a structured error dict."""
         from mcpvectordb import server
 
         async def _raise(*args, **kwargs):
@@ -214,7 +214,7 @@ class TestIngestContentTool:
 
     @pytest.mark.unit
     def test_returns_indexed_on_new_content(self, monkeypatch):
-        """ingest_content returns status='indexed' with doc_id and chunk_count on new content."""
+        """New content returns status='indexed' with doc_id and chunk_count."""
         from mcpvectordb import server
         from mcpvectordb.ingestor import IngestResult
 
@@ -236,7 +236,7 @@ class TestIngestContentTool:
 
     @pytest.mark.unit
     def test_returns_skipped_for_duplicate(self, monkeypatch):
-        """ingest_content returns status='skipped' and chunk_count=0 for duplicate content."""
+        """Duplicate content returns status='skipped' and chunk_count=0."""
         from mcpvectordb import server
         from mcpvectordb.ingestor import IngestResult
 
@@ -280,7 +280,7 @@ class TestIngestContentTool:
 
     @pytest.mark.unit
     def test_empty_content_returns_error(self):
-        """Empty or whitespace-only content returns an error dict without calling _ingest_content."""
+        """Empty or blank content returns an error without calling _ingest_content."""
         from mcpvectordb import server
 
         result_empty = run(server.ingest_content(content="", source="test.txt"))
@@ -399,7 +399,7 @@ class TestSearchTool:
 
     @pytest.mark.unit
     def test_search_store_error_returns_error(self, monkeypatch):
-        """StoreError from the store returns a structured error dict (lines 157-158)."""
+        """StoreError from the store returns a structured error dict."""
         from mcpvectordb import server
         from mcpvectordb.exceptions import StoreError
 
@@ -419,7 +419,7 @@ class TestSearchTool:
 
     @pytest.mark.unit
     def test_search_unexpected_exception_returns_error(self, monkeypatch):
-        """Unexpected exception in search returns a structured error dict (lines 159-161)."""
+        """Unexpected exception in search returns a structured error dict."""
         from mcpvectordb import server
 
         bad_store = MagicMock()
@@ -467,7 +467,7 @@ class TestListDocumentsTool:
 
     @pytest.mark.unit
     def test_list_documents_store_error_returns_error(self, monkeypatch):
-        """StoreError from list_documents returns a structured error dict (lines 188-189)."""
+        """StoreError from list_documents returns a structured error dict."""
         from mcpvectordb import server
         from mcpvectordb.exceptions import StoreError
 
@@ -481,7 +481,7 @@ class TestListDocumentsTool:
 
     @pytest.mark.unit
     def test_list_documents_unexpected_exception_returns_error(self, monkeypatch):
-        """Unexpected exception in list_documents returns a structured error dict (lines 190-192)."""
+        """Unexpected exception in list_documents returns a structured error dict."""
         from mcpvectordb import server
 
         bad_store = MagicMock()
@@ -507,7 +507,7 @@ class TestListLibrariesTool:
 
     @pytest.mark.unit
     def test_list_libraries_store_error_returns_error(self, monkeypatch):
-        """StoreError from list_libraries returns a structured error dict (lines 206-207)."""
+        """StoreError from list_libraries returns a structured error dict."""
         from mcpvectordb import server
         from mcpvectordb.exceptions import StoreError
 
@@ -521,7 +521,7 @@ class TestListLibrariesTool:
 
     @pytest.mark.unit
     def test_list_libraries_unexpected_exception_returns_error(self, monkeypatch):
-        """Unexpected exception in list_libraries returns a structured error dict (lines 208-210)."""
+        """Unexpected exception in list_libraries returns a structured error dict."""
         from mcpvectordb import server
 
         bad_store = MagicMock()
@@ -555,7 +555,7 @@ class TestDeleteDocumentTool:
 
     @pytest.mark.unit
     def test_delete_document_store_error_returns_error(self, monkeypatch):
-        """StoreError from delete_document returns a structured error dict (lines 229-230)."""
+        """StoreError from delete_document returns a structured error dict."""
         from mcpvectordb import server
         from mcpvectordb.exceptions import StoreError
 
@@ -569,7 +569,7 @@ class TestDeleteDocumentTool:
 
     @pytest.mark.unit
     def test_delete_document_unexpected_exception_returns_error(self, monkeypatch):
-        """Unexpected exception in delete_document returns a structured error dict (lines 231-233)."""
+        """Unexpected exception in delete_document returns a structured error dict."""
         from mcpvectordb import server
 
         bad_store = MagicMock()
@@ -603,7 +603,7 @@ class TestGetDocumentTool:
 
     @pytest.mark.integration
     def test_get_document_returns_full_content(self, _use_tmp_store):
-        """get_document returns content and metadata for an existing document (lines 255-265)."""
+        """get_document returns content and metadata for an existing document."""
         import json
         import uuid
         from datetime import UTC, datetime
@@ -640,7 +640,7 @@ class TestGetDocumentTool:
 
     @pytest.mark.unit
     def test_get_document_store_error_returns_error(self, monkeypatch):
-        """StoreError from get_document returns a structured error dict (lines 266-267)."""
+        """StoreError from get_document returns a structured error dict."""
         from mcpvectordb import server
         from mcpvectordb.exceptions import StoreError
 
@@ -654,7 +654,7 @@ class TestGetDocumentTool:
 
     @pytest.mark.unit
     def test_get_document_unexpected_exception_returns_error(self, monkeypatch):
-        """Unexpected exception in get_document returns a structured error dict (lines 268-270)."""
+        """Unexpected exception in get_document returns a structured error dict."""
         from mcpvectordb import server
 
         bad_store = MagicMock()
@@ -839,7 +839,7 @@ class TestValidateOAuthConfig:
 
     @pytest.mark.unit
     def test_valid_oauth_config_passes(self, monkeypatch):
-        """OAUTH_ENABLED=true with client_id and streamable-http passes without error."""
+        """OAUTH_ENABLED=true with client_id on streamable-http passes."""
         import mcpvectordb.config as config_mod
         from mcpvectordb.server import _validate_oauth_config
 
@@ -858,7 +858,7 @@ class TestFrozenBundleContext:
 
     @pytest.mark.unit
     def test_frozen_sets_fastembed_cache_env_var(self, tmp_path, monkeypatch):
-        """When sys.frozen is True, main() sets FASTEMBED_CACHE_PATH to bundled cache."""
+        """Frozen main() sets FASTEMBED_CACHE_PATH to the bundled cache."""
         import os
 
         import mcpvectordb.config as config_mod
@@ -885,7 +885,7 @@ class TestFrozenBundleContext:
 
     @pytest.mark.unit
     def test_frozen_respects_explicit_env_var(self, tmp_path, monkeypatch):
-        """When FASTEMBED_CACHE_PATH is already set, frozen detection does not override it."""
+        """An explicit FASTEMBED_CACHE_PATH survives frozen detection."""
         import mcpvectordb.config as config_mod
         import mcpvectordb.server as server_mod
 
@@ -1007,7 +1007,7 @@ class TestMainFunction:
 
     @pytest.mark.unit
     def test_main_runs_with_stdio_transport(self, monkeypatch):
-        """main() calls mcp.run(transport='stdio') when configured (lines 276-284)."""
+        """main() calls mcp.run(transport='stdio') when configured."""
         import mcpvectordb.config as config_mod
         import mcpvectordb.server as server_mod
 
@@ -1038,7 +1038,7 @@ class TestMainFunction:
 
 @pytest.fixture
 def upload_client(monkeypatch):
-    """TestClient with _ingest_content and _convert patched for upload endpoint tests."""
+    """TestClient with _ingest_content and _convert patched for /upload tests."""
     from mcpvectordb import server
     from mcpvectordb.ingestor import IngestResult
 
@@ -1080,7 +1080,7 @@ class TestUploadEndpoint:
 
     @pytest.mark.unit
     def test_upload_invalid_metadata_json_returns_400(self, upload_client):
-        """POST with non-JSON metadata field returns 400 with 'metadata' in the error."""
+        """Non-JSON metadata returns 400 with 'metadata' in the error."""
         response = upload_client.post(
             "/upload",
             files={"file": ("test.txt", b"hello", "text/plain")},
@@ -1104,7 +1104,7 @@ class TestUploadEndpoint:
 
     @pytest.mark.unit
     def test_upload_unsupported_format_returns_422(self, monkeypatch, upload_client):
-        """_convert raising UnsupportedFormatError returns 422 with 'Unsupported' in error."""
+        """UnsupportedFormatError from _convert returns 422 ('Unsupported')."""
         from mcpvectordb.exceptions import UnsupportedFormatError
 
         monkeypatch.setattr(
@@ -1148,7 +1148,7 @@ class TestUploadEndpoint:
 
     @pytest.mark.unit
     def test_upload_ingestion_error_returns_500(self, monkeypatch, upload_client):
-        """IngestionError from _ingest_content returns 500 with 'Ingestion failed' in error."""
+        """IngestionError from _ingest_content returns 500 ('Ingestion failed')."""
         from mcpvectordb.exceptions import IngestionError
 
         async def _raise(*args, **kwargs):

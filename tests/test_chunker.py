@@ -106,7 +106,7 @@ class TestChunkInternals:
 
     @pytest.mark.unit
     def test_split_recursive_base_case_empty_separators(self):
-        """_split_recursive returns [text] unchanged when no separators remain (line 70)."""
+        """_split_recursive returns [text] unchanged when no separators remain."""
         from mcpvectordb.chunker import _split_recursive
 
         result = _split_recursive("some text that cannot be split further", [], 512, 64)

@@ -104,7 +104,7 @@ class TestEmbedderUnit:
 
     @pytest.mark.unit
     def test_init_loads_sentence_transformer_and_stores_batch_size(self, monkeypatch):
-        """Embedder.__init__ loads TextEmbedding and stores batch_size (lines 34-38)."""
+        """Embedder.__init__ loads TextEmbedding and stores batch_size."""
         from unittest.mock import MagicMock
 
         import fastembed
@@ -123,7 +123,7 @@ class TestEmbedderUnit:
 
     @pytest.mark.unit
     def test_embed_documents_empty_list_returns_zero_shape_without_model_call(self):
-        """embed_documents([]) returns (0, 768) float32 array without calling model (line 55)."""
+        """embed_documents([]) returns (0, 768) float32 array without calling model."""
         from unittest.mock import MagicMock
 
         from mcpvectordb.embedder import Embedder
@@ -140,7 +140,7 @@ class TestEmbedderUnit:
 
     @pytest.mark.unit
     def test_embed_documents_returns_float32_array(self):
-        """embed_documents returns float32 array of shape (n, 768) on success (line 64)."""
+        """embed_documents returns float32 array of shape (n, 768) on success."""
         from unittest.mock import MagicMock
 
         from mcpvectordb.embedder import Embedder
@@ -160,7 +160,7 @@ class TestEmbedderUnit:
 
     @pytest.mark.unit
     def test_embed_query_returns_float32_vector(self):
-        """embed_query returns float32 array of shape (768,) on success (lines 82-89)."""
+        """embed_query returns float32 array of shape (768,) on success."""
         from unittest.mock import MagicMock
 
         from mcpvectordb.embedder import Embedder
@@ -178,7 +178,7 @@ class TestEmbedderUnit:
 
     @pytest.mark.unit
     def test_embed_query_raises_embedding_error_on_model_failure(self):
-        """embed_query raises EmbeddingError when the model raises (lines 90-91)."""
+        """embed_query raises EmbeddingError when the model raises."""
         from unittest.mock import MagicMock
 
         from mcpvectordb.embedder import Embedder
@@ -195,7 +195,7 @@ class TestEmbedderUnit:
 
     @pytest.mark.unit
     def test_get_embedder_creates_instance_when_none(self, monkeypatch):
-        """get_embedder initialises a new Embedder when _instance is None (line 98)."""
+        """get_embedder initialises a new Embedder when _instance is None."""
         from unittest.mock import MagicMock
 
         import fastembed

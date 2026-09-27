@@ -64,7 +64,8 @@ async def _ingest_dir(
         print(f"\n  Folder: {result.folder}")
         print(
             f"  Found: {result.total_files}  Indexed: {result.indexed}  "
-            f"Replaced: {result.replaced}  Skipped: {result.skipped}  Failed: {result.failed}"
+            f"Replaced: {result.replaced}  Skipped: {result.skipped}  "
+            f"Failed: {result.failed}"
         )
         for err in result.errors:
             print(f"  ERROR  {err['file']}: {err['error']}", file=sys.stderr)
@@ -132,7 +133,7 @@ def main() -> None:
         "--max-concurrency",
         type=int,
         default=4,
-        help="Max files processed simultaneously (applies to folder inputs only). Default: 4.",
+        help="Max files processed at once (folder inputs only). Default: 4.",
     )
     args = parser.parse_args()
 
@@ -151,7 +152,7 @@ def main() -> None:
 
     total, indexed, replaced, skipped, failed = asyncio.run(_run(args, Store()))
 
-    print(f"\nIngestion complete.")
+    print("\nIngestion complete.")
     print(f"  Library   : {args.library}")
     print(f"  Found     : {total}")
     print(

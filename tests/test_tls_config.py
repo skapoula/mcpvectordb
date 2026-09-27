@@ -60,7 +60,7 @@ def test_sse_logs_warning(
 
 @pytest.mark.unit
 def test_missing_both_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    """TLS enabled, streamable-http, no cert or key — ConfigurationError naming both vars."""
+    """TLS on, no cert or key: ConfigurationError naming both vars."""
     mock_settings = _make_settings(
         tls_enabled=True,
         mcp_transport="streamable-http",
@@ -74,7 +74,7 @@ def test_missing_both_raises(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.unit
 def test_missing_key_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """TLS enabled, cert file exists, key is None — ConfigurationError naming TLS_KEY_FILE."""
+    """TLS on, cert exists, key None: ConfigurationError naming TLS_KEY_FILE."""
     cert = tmp_path / "cert.pem"
     cert.write_text("cert")
     mock_settings = _make_settings(
@@ -90,7 +90,7 @@ def test_missing_key_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
 
 @pytest.mark.unit
 def test_cert_not_found_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """TLS enabled, cert path does not exist on disk — ConfigurationError with 'not found'."""
+    """TLS on, cert path missing on disk: ConfigurationError 'not found'."""
     key = tmp_path / "key.pem"
     key.write_text("key")
     mock_settings = _make_settings(
@@ -106,7 +106,7 @@ def test_cert_not_found_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
 
 @pytest.mark.unit
 def test_key_not_found_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """TLS enabled, key path does not exist on disk — ConfigurationError with 'not found'."""
+    """TLS on, key path missing on disk: ConfigurationError 'not found'."""
     cert = tmp_path / "cert.pem"
     cert.write_text("cert")
     mock_settings = _make_settings(

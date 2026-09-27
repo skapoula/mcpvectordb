@@ -548,7 +548,8 @@ async def upload_handler(request: Request) -> JSONResponse:
                 "status": "error",
                 "error": (
                     f"No text could be extracted from {filename!r}. "
-                    "The file may be scanned/image-based, password-protected, or empty. "
+                    "The file may be scanned/image-based, password-protected, "
+                    "or empty. "
                     "Use ingest_content to pass the text directly."
                 ),
             },

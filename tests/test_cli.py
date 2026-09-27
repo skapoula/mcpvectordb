@@ -8,7 +8,6 @@ import pytest
 from mcpvectordb.exceptions import IngestionError
 from mcpvectordb.ingestor import BulkIngestResult, IngestResult
 
-
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 
@@ -203,7 +202,6 @@ def test_cli_multiple_files_partial_failure_exits_one(
     file_b = tmp_path / "b.docx"
     file_a.write_bytes(b"%PDF")
     file_b.write_bytes(b"PK")
-    paths = {str(file_a), str(file_b)}
     call_count = {"n": 0}
 
     async def _fake_ingest(source, **kwargs):
