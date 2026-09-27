@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      # pyproject pins <3.14 (no onnxruntime wheel yet); dev group includes
+      # pytest, ruff and mypy.
+      - run: uv sync --python 3.13
+
+      # The chunker tests load the real tokenizer with local_files_only=True.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.mcpvectordb/models
+            ~/.cache/huggingface
+          key: models-${{ hashFiles('src/mcpvectordb/config.py') }}
+      - run: uv run mcpvectordb-download-model
+
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy src/
+      - run: uv run pytest
