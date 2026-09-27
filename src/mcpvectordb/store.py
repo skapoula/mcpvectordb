@@ -395,8 +395,10 @@ class Store:
             rows: list[dict] = []
             if settings.hybrid_search_enabled:
                 try:
-                    query = table.search(query_text, query_type="hybrid").vector(
-                        np.array(embedding, dtype=np.float32)
+                    query = (
+                        table.search(query_type="hybrid")
+                        .vector(np.array(embedding, dtype=np.float32))
+                        .text(query_text)
                     )
                     if where is not None:
                         query = query.where(where)

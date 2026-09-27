@@ -714,6 +714,32 @@ class TestStoreHybridSearch:
     """Hybrid search (BM25 + vector) tests."""
 
     @pytest.mark.integration
+    def test_hybrid_ranks_exact_term_without_vector_fallback(self, store, monkeypatch):
+        """BM25 surfaces an exact-term row that vector similarity alone ranks last."""
+        dim = settings.embedding_dimension
+        query_vec = np.ones(dim, dtype=np.float32)
+        store.upsert_chunks(
+            [
+                _make_chunk(content=f"generic filler text {i}", embedding=[1.0] * dim)
+                for i in range(10)
+            ]
+            + [_make_chunk(content="error code E4021 in prod", embedding=[-1.0] * dim)]
+        )
+
+        def _no_fallback(*args, **kwargs):
+            raise AssertionError("hybrid search fell back to vector-only")
+
+        monkeypatch.setattr(store, "_vector_search", _no_fallback)
+        results = store.search(
+            embedding=query_vec.tolist(),
+            query_text="E4021",
+            top_k=3,
+            library=None,
+            filter=None,
+        )
+        assert any("E4021" in r.content for r in results)
+
+    @pytest.mark.integration
     def test_hybrid_finds_exact_term(self, store):
         """Hybrid search retrieves a document by an exact term BM25 can match."""
         doc_id = str(uuid.uuid4())
@@ -792,7 +818,6 @@ class TestStoreHybridSearch:
     @pytest.mark.unit
     def test_refine_factor_applied(self, store, monkeypatch):
         """search() calls refine_factor() with the configured value on both paths."""
-        from unittest.mock import MagicMock, patch
 
         import mcpvectordb.store as store_module
 
