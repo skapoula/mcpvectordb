@@ -507,6 +507,8 @@ async def upload_handler(request: Request) -> JSONResponse:
 
     raw_meta = form.get("metadata")
     try:
+        if raw_meta is not None and not isinstance(raw_meta, str):
+            raise ValueError("metadata was sent as a file part")
         metadata = json.loads(raw_meta) if raw_meta else None
     except ValueError:
         return JSONResponse(

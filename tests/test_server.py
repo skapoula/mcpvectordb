@@ -1090,6 +1090,19 @@ class TestUploadEndpoint:
         assert "metadata" in response.json()["error"]
 
     @pytest.mark.unit
+    def test_upload_metadata_sent_as_file_returns_400(self, upload_client):
+        """A metadata part sent as a file (not a string) returns 400, not 500."""
+        response = upload_client.post(
+            "/upload",
+            files={
+                "file": ("test.txt", b"hello", "text/plain"),
+                "metadata": ("m.json", b'{"a": 1}', "application/json"),
+            },
+        )
+        assert response.status_code == 400
+        assert "metadata" in response.json()["error"]
+
+    @pytest.mark.unit
     def test_upload_unsupported_format_returns_422(self, monkeypatch, upload_client):
         """_convert raising UnsupportedFormatError returns 422 with 'Unsupported' in error."""
         from mcpvectordb.exceptions import UnsupportedFormatError
