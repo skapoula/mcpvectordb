@@ -466,6 +466,26 @@ class TestIngestFolder:
         assert result.failed == 0
 
     @pytest.mark.integration
+    async def test_ingest_folder_optimizes_store_once(
+        self, tmp_path, store, mock_embedder, _patch_chunker, _patch_converter
+    ):
+        """A bulk ingest ends with one compaction of the store."""
+        (tmp_path / "a.pdf").write_bytes(b"%PDF minimal")
+        (tmp_path / "b.pdf").write_bytes(b"%PDF minimal2")
+        calls = []
+        store.optimize = lambda **k: calls.append(k)
+
+        await ingest_folder(
+            folder=tmp_path,
+            library="default",
+            metadata=None,
+            store=store,
+            max_concurrency=1,
+        )
+
+        assert len(calls) == 1
+
+    @pytest.mark.integration
     async def test_ingest_folder_skips_unsupported_extensions(
         self, tmp_path, store, mock_embedder, _patch_chunker, _patch_converter
     ):

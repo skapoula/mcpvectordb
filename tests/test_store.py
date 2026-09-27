@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pytest
@@ -763,6 +763,38 @@ class TestStoreFtsIndex:
         store.upsert_chunks([_make_chunk(doc_id=doc_id, content="doomed qwertyuio")])
         store.delete_document(doc_id)
         assert not any("qwertyuio" in c for c in _hybrid_hits(store, "qwertyuio"))
+
+
+class TestStoreOptimize:
+    """Compaction keeps the version history bounded without losing data."""
+
+    @pytest.mark.integration
+    def test_optimize_bounds_versions_and_keeps_search(self, store, monkeypatch):
+        """optimize() drops old versions; FTS and vector search still work."""
+        for i in range(10):
+            store.upsert_chunks([_make_chunk(content=f"row {i} term{i}xq")])
+        assert len(store._table().list_versions()) > 3
+
+        store.optimize(cleanup_older_than=timedelta(0))
+
+        assert len(store._table().list_versions()) <= 3
+        assert store._table().count_rows() == 10
+        monkeypatch.setattr(
+            store, "_vector_search", lambda *a, **k: pytest.fail("fallback used")
+        )
+        assert any("term9xq" in c for c in _hybrid_hits(store, "term9xq"))
+
+    @pytest.mark.integration
+    def test_upsert_optimizes_every_n_writes(self, store, monkeypatch):
+        """upsert_chunks triggers optimize() once per _OPTIMIZE_EVERY writes."""
+        import mcpvectordb.store as store_module
+
+        monkeypatch.setattr(store_module, "_OPTIMIZE_EVERY", 3)
+        calls = []
+        monkeypatch.setattr(store, "optimize", lambda **k: calls.append(k))
+        for i in range(7):
+            store.upsert_chunks([_make_chunk(content=f"row {i}")])
+        assert len(calls) == 2
 
 
 class TestStoreHybridSearch:

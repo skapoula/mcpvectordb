@@ -114,6 +114,8 @@ async def ingest_folder(
         *[_ingest_one(sem, p, library, metadata, store) for p in candidates],
         return_exceptions=True,
     )
+    if candidates:
+        await asyncio.to_thread(store.optimize)
 
     results: list[IngestResult] = []
     errors: list[dict] = []

@@ -3,6 +3,8 @@
 import json
 import logging
 import re
+import threading
+from datetime import timedelta
 from pathlib import Path
 
 import lancedb
@@ -14,6 +16,9 @@ from mcpvectordb.config import settings
 from mcpvectordb.exceptions import StoreError
 
 logger = logging.getLogger(__name__)
+
+# Every write creates a table version; compact and prune after this many upserts.
+_OPTIMIZE_EVERY = 50
 
 
 class ChunkRecord(BaseModel):
@@ -248,6 +253,8 @@ class Store:
         self._table_name = table_name or settings.lancedb_table_name
         self._indexes_created = False
         self._fts_ready = False
+        self._writes = 0
+        self._optimize_lock = threading.Lock()
 
     def _table(self) -> lancedb.table.Table:
         """Open and return the LanceDB table, creating scalar indexes on first call."""
@@ -282,8 +289,29 @@ class Store:
             if not self._fts_ready:
                 _ensure_fts_index(table)
                 self._fts_ready = True
+            self._writes += 1
+            if self._writes % _OPTIMIZE_EVERY == 0:
+                self.optimize()
         except Exception as e:
             raise StoreError(f"Failed to upsert {len(chunks)} chunks") from e
+
+    def optimize(self, cleanup_older_than: timedelta = timedelta(minutes=1)) -> None:
+        """Compact data files, fold new rows into indexes, and prune old versions.
+
+        Failures are logged, not raised: the data is already written and a
+        missed compaction only costs disk space and some search speed.
+
+        Args:
+            cleanup_older_than: Delete versions older than this.
+        """
+        # ponytail: 1-minute grace so a concurrent reader's version survives;
+        # raise it if long-running queries ever hit missing files.
+        with self._optimize_lock:
+            try:
+                self._table().optimize(cleanup_older_than=cleanup_older_than)
+                logger.debug("Optimized table %r", self._table_name)
+            except Exception as e:
+                logger.warning("Table optimize failed (disk not reclaimed): %s", e)
 
     def find_existing(self, source: str, library: str) -> tuple[str | None, str | None]:
         """Look up an existing document by (source, library) dedup key.
