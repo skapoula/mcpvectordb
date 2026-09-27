@@ -147,7 +147,9 @@ class TestEmbedderUnit:
 
         emb = object.__new__(Embedder)
         mock_model = MagicMock()
-        mock_model.embed.return_value = [np.random.rand(768).astype(np.float32) for _ in range(2)]
+        mock_model.embed.return_value = [
+            np.random.rand(768).astype(np.float32) for _ in range(2)
+        ]
         emb._model = mock_model
         emb._batch_size = 32
 

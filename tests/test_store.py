@@ -33,7 +33,8 @@ def _make_chunk(
         content_hash=content_hash,
         title="Test Document",
         content=content,
-        embedding=embedding or np.random.rand(settings.embedding_dimension).astype(np.float32).tolist(),
+        embedding=embedding
+        or np.random.rand(settings.embedding_dimension).astype(np.float32).tolist(),
         chunk_index=chunk_index,
         created_at=datetime.now(UTC).isoformat(),
         metadata=json.dumps({}),
@@ -86,7 +87,9 @@ class TestStoreSearch:
     @pytest.mark.integration
     def test_search_empty_table_returns_empty(self, store):
         """Searching an empty table returns [] without raising."""
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         result = store.search(
             embedding=embedding,
             query_text="test query",
@@ -103,7 +106,9 @@ class TestStoreSearch:
         chunks = [_make_chunk(doc_id=doc_id, chunk_index=i) for i in range(10)]
         store.upsert_chunks(chunks)
 
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         result = store.search(
             embedding=embedding,
             query_text="test query",
@@ -126,7 +131,9 @@ class TestStoreSearch:
         ]
         store.upsert_chunks(chunks_a + chunks_b)
 
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         result = store.search(
             embedding=embedding,
             query_text="test query",
@@ -511,10 +518,16 @@ class TestStoreFilter:
             [_make_chunk(doc_id=doc_pdf, file_type="pdf", content="pdf content here")]
         )
         store.upsert_chunks(
-            [_make_chunk(doc_id=doc_html, file_type="html", content="html content here")]
+            [
+                _make_chunk(
+                    doc_id=doc_html, file_type="html", content="html content here"
+                )
+            ]
         )
 
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         results = store.search(
             embedding=embedding,
             query_text="content",
@@ -531,12 +544,18 @@ class TestStoreFilter:
         doc_id = str(uuid.uuid4())
         store.upsert_chunks(
             [
-                _make_chunk(doc_id=doc_id, chunk_index=0, page=1, content="page one text"),
-                _make_chunk(doc_id=doc_id, chunk_index=1, page=2, content="page two text"),
+                _make_chunk(
+                    doc_id=doc_id, chunk_index=0, page=1, content="page one text"
+                ),
+                _make_chunk(
+                    doc_id=doc_id, chunk_index=1, page=2, content="page two text"
+                ),
             ]
         )
 
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         results = store.search(
             embedding=embedding,
             query_text="page",
@@ -559,7 +578,9 @@ class TestStoreFilter:
             [_make_chunk(doc_id=doc_b, library="lib_a", file_type="html")]
         )
 
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         results = store.search(
             embedding=embedding,
             query_text="test",
@@ -577,7 +598,9 @@ class TestStoreFilter:
         monkeypatch.setattr(
             store, "_table", lambda: None
         )  # table not needed — error is raised before use
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         with pytest.raises(StoreError):
             store.search(
                 embedding=embedding,
@@ -697,7 +720,9 @@ class TestStoreHybridSearch:
         store.upsert_chunks(
             [_make_chunk(doc_id=doc_id, content="deployment error code E-4021 in prod")]
         )
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         results = store.search(
             embedding=embedding,
             query_text="E-4021",
@@ -710,7 +735,9 @@ class TestStoreHybridSearch:
     @pytest.mark.integration
     def test_hybrid_empty_table_returns_empty(self, store):
         """Hybrid search on empty table returns [] without raising."""
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         results = store.search(
             embedding=embedding,
             query_text="anything",
@@ -730,7 +757,9 @@ class TestStoreHybridSearch:
         store.upsert_chunks(
             [_make_chunk(doc_id=doc_b, library="lib_b", content="alpha omega delta")]
         )
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         results = store.search(
             embedding=embedding,
             query_text="alpha omega",
@@ -748,7 +777,9 @@ class TestStoreHybridSearch:
         monkeypatch.setattr(store_module.settings, "hybrid_search_enabled", False)
         doc_id = str(uuid.uuid4())
         store.upsert_chunks([_make_chunk(doc_id=doc_id)])
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         results = store.search(
             embedding=embedding,
             query_text="test",
@@ -792,7 +823,9 @@ class TestStoreHybridSearch:
 
         monkeypatch.setattr(store_module.settings, "hybrid_search_enabled", False)
         monkeypatch.setattr(store, "_table", patched_table)
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         store.search(
             embedding=embedding,
             query_text="test",

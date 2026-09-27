@@ -29,8 +29,14 @@ async def _ingest_file(path: Path, library: str, store: Store) -> _Counts:
     """Ingest a single file and print a one-line result."""
     try:
         result = await ingest(source=path, library=library, metadata=None, store=store)
-        print(f"  {result.status.upper():<8} {path.name}  ({result.chunk_count} chunks)")
-        counts = {"indexed": (1, 0, 0, 0), "replaced": (0, 1, 0, 0), "skipped": (0, 0, 1, 0)}
+        print(
+            f"  {result.status.upper():<8} {path.name}  ({result.chunk_count} chunks)"
+        )
+        counts = {
+            "indexed": (1, 0, 0, 0),
+            "replaced": (0, 1, 0, 0),
+            "skipped": (0, 0, 1, 0),
+        }
         i, r, s, f = counts.get(result.status, (0, 0, 0, 0))
         return 1, i, r, s, f
     except (IngestionError, UnsupportedFormatError) as e:
@@ -62,7 +68,13 @@ async def _ingest_dir(
         )
         for err in result.errors:
             print(f"  ERROR  {err['file']}: {err['error']}", file=sys.stderr)
-        return result.total_files, result.indexed, result.replaced, result.skipped, result.failed
+        return (
+            result.total_files,
+            result.indexed,
+            result.replaced,
+            result.skipped,
+            result.failed,
+        )
     except IngestionError as e:
         print(f"Error: {path}: {e}", file=sys.stderr)
         return 1, 0, 0, 0, 1

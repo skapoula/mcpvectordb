@@ -30,7 +30,8 @@ class TestServerModuleInit:
 
         try:
             file_handlers = [
-                h for h in server_mod._log_handlers
+                h
+                for h in server_mod._log_handlers
                 if isinstance(h, logging.FileHandler)
             ]
             assert len(file_handlers) >= 1

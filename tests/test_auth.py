@@ -38,9 +38,7 @@ class TestGoogleTokenVerifier:
             url=f"{TOKENINFO_URL}?access_token={VALID_TOKEN}",
             json=_tokeninfo_response(),
         )
-        verifier = GoogleTokenVerifier(
-            client_id=CLIENT_ID, allowed_emails=[]
-        )
+        verifier = GoogleTokenVerifier(client_id=CLIENT_ID, allowed_emails=[])
         result = await verifier.verify_token(VALID_TOKEN)
 
         assert result is not None

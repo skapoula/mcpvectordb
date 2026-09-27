@@ -73,9 +73,7 @@ def test_missing_both_raises(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.unit
-def test_missing_key_raises(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_missing_key_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """TLS enabled, cert file exists, key is None — ConfigurationError naming TLS_KEY_FILE."""
     cert = tmp_path / "cert.pem"
     cert.write_text("cert")
@@ -91,9 +89,7 @@ def test_missing_key_raises(
 
 
 @pytest.mark.unit
-def test_cert_not_found_raises(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_cert_not_found_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """TLS enabled, cert path does not exist on disk — ConfigurationError with 'not found'."""
     key = tmp_path / "key.pem"
     key.write_text("key")
@@ -109,9 +105,7 @@ def test_cert_not_found_raises(
 
 
 @pytest.mark.unit
-def test_key_not_found_raises(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_key_not_found_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """TLS enabled, key path does not exist on disk — ConfigurationError with 'not found'."""
     cert = tmp_path / "cert.pem"
     cert.write_text("cert")
@@ -127,9 +121,7 @@ def test_key_not_found_raises(
 
 
 @pytest.mark.unit
-def test_valid_config_no_error(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_valid_config_no_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """TLS enabled, both files exist — no raise."""
     cert = tmp_path / "cert.pem"
     key = tmp_path / "key.pem"

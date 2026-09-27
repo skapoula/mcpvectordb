@@ -433,7 +433,11 @@ class TestIngestHelpers:
         )
 
         with pytest.raises(IngestionError, match="HTML conversion failed"):
-            run(_convert_html_bytes(b"<html><body>test</body></html>", "https://example.com"))
+            run(
+                _convert_html_bytes(
+                    b"<html><body>test</body></html>", "https://example.com"
+                )
+            )
 
 
 class TestIngestFolder:
@@ -450,7 +454,10 @@ class TestIngestFolder:
 
         # max_concurrency=1 avoids LanceDB concurrent-write race during table init
         result = await ingest_folder(
-            folder=tmp_path, library="default", metadata=None, store=store,
+            folder=tmp_path,
+            library="default",
+            metadata=None,
+            store=store,
             max_concurrency=1,
         )
 
@@ -561,9 +568,7 @@ class TestIngestFolder:
         f.write_bytes(b"%PDF content")
 
         with pytest.raises(IngestionError):
-            await ingest_folder(
-                folder=f, library="default", metadata=None, store=store
-            )
+            await ingest_folder(folder=f, library="default", metadata=None, store=store)
 
     @pytest.mark.integration
     async def test_ingest_folder_returns_bulk_ingest_result(

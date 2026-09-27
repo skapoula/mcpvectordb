@@ -91,7 +91,9 @@ class TestIngestFileTool:
         assert "error" in result
 
     @pytest.mark.unit
-    def test_ingest_file_ingestion_error_returns_error_dict(self, tmp_path, monkeypatch):
+    def test_ingest_file_ingestion_error_returns_error_dict(
+        self, tmp_path, monkeypatch
+    ):
         """IngestionError from the pipeline returns a structured error dict (lines 64-65)."""
         from mcpvectordb import server
         from mcpvectordb.exceptions import IngestionError
@@ -109,7 +111,9 @@ class TestIngestFileTool:
         assert "Ingestion failed" in result["error"]
 
     @pytest.mark.unit
-    def test_ingest_file_unexpected_exception_returns_error_dict(self, tmp_path, monkeypatch):
+    def test_ingest_file_unexpected_exception_returns_error_dict(
+        self, tmp_path, monkeypatch
+    ):
         """Unexpected exception returns a structured error dict (lines 66-68)."""
         from mcpvectordb import server
 
@@ -267,7 +271,9 @@ class TestIngestContentTool:
             )
 
         monkeypatch.setattr("mcpvectordb.server._ingest_content", _fake)
-        result = run(server.ingest_content(content="Updated content", source="test.txt"))
+        result = run(
+            server.ingest_content(content="Updated content", source="test.txt")
+        )
 
         assert result["status"] == "replaced"
         assert "doc_id" in result
@@ -382,7 +388,9 @@ class TestSearchTool:
         )
         # Patch get_embedder to return a mock
         mock_emb = MagicMock()
-        mock_emb.embed_query.return_value = np.random.rand(settings.embedding_dimension).astype(np.float32)
+        mock_emb.embed_query.return_value = np.random.rand(
+            settings.embedding_dimension
+        ).astype(np.float32)
         monkeypatch.setattr("mcpvectordb.server.get_embedder", lambda: mock_emb)
 
         result = run(server.search(query="machine learning", top_k=5))
@@ -400,7 +408,9 @@ class TestSearchTool:
         monkeypatch.setattr("mcpvectordb.server._store", bad_store)
 
         mock_emb = MagicMock()
-        mock_emb.embed_query.return_value = np.random.rand(settings.embedding_dimension).astype(np.float32)
+        mock_emb.embed_query.return_value = np.random.rand(
+            settings.embedding_dimension
+        ).astype(np.float32)
         monkeypatch.setattr("mcpvectordb.server.get_embedder", lambda: mock_emb)
 
         result = run(server.search(query="test query"))
@@ -417,7 +427,9 @@ class TestSearchTool:
         monkeypatch.setattr("mcpvectordb.server._store", bad_store)
 
         mock_emb = MagicMock()
-        mock_emb.embed_query.return_value = np.random.rand(settings.embedding_dimension).astype(np.float32)
+        mock_emb.embed_query.return_value = np.random.rand(
+            settings.embedding_dimension
+        ).astype(np.float32)
         monkeypatch.setattr("mcpvectordb.server.get_embedder", lambda: mock_emb)
 
         result = run(server.search(query="test query"))
@@ -893,9 +905,7 @@ class TestFrozenBundleContext:
         assert os.environ.get("FASTEMBED_CACHE_PATH") == explicit
 
     @pytest.mark.unit
-    def test_frozen_bundle_not_overridden_by_default_cache(
-        self, tmp_path, monkeypatch
-    ):
+    def test_frozen_bundle_not_overridden_by_default_cache(self, tmp_path, monkeypatch):
         """The settings default cache path must not replace the bundled model cache."""
         import os
 
@@ -1198,8 +1208,13 @@ class TestIngestFolderTool:
         result = run(server.ingest_folder(folder=str(tmp_path)))
 
         expected_keys = (
-            "total_files", "indexed", "replaced",
-            "skipped", "failed", "results", "errors",
+            "total_files",
+            "indexed",
+            "replaced",
+            "skipped",
+            "failed",
+            "results",
+            "errors",
         )
         for key in expected_keys:
             assert key in result, f"Missing key: {key}"

@@ -96,14 +96,14 @@ async def ingest_folder(
 
     pattern = "**/*" if recursive else "*"
     candidates = sorted(
-        p for p in folder_path.glob(pattern)
+        p
+        for p in folder_path.glob(pattern)
         if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
     )
 
     if not candidates:
         logger.warning(
-            "No supported files found in %s (recursive=%s). "
-            "Supported extensions: %s",
+            "No supported files found in %s (recursive=%s). Supported extensions: %s",
             folder_path,
             recursive,
             ", ".join(sorted(SUPPORTED_EXTENSIONS)),

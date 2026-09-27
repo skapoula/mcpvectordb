@@ -11,6 +11,7 @@ from mcpvectordb.ingestor import BulkIngestResult, IngestResult
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+
 def _make_ingest_result(tmp_path, status: str = "indexed") -> IngestResult:
     """Build a minimal IngestResult for single-file tests."""
     return IngestResult(
@@ -75,13 +76,15 @@ def _mock_models(monkeypatch):
 
 # ── Argument parsing ───────────────────────────────────────────────────────────
 
+
 @pytest.mark.unit
 def test_cli_help_exits_cleanly():
     """--help prints usage and exits 0."""
     from mcpvectordb.cli import main
 
-    with pytest.raises(SystemExit) as exc_info, patch(
-        "sys.argv", ["mcpvectordb-ingest", "--help"]
+    with (
+        pytest.raises(SystemExit) as exc_info,
+        patch("sys.argv", ["mcpvectordb-ingest", "--help"]),
     ):
         main()
     assert exc_info.value.code == 0
@@ -92,14 +95,16 @@ def test_cli_missing_path_arg_exits_nonzero():
     """No positional path arg → argparse error, exit 2."""
     from mcpvectordb.cli import main
 
-    with pytest.raises(SystemExit) as exc_info, patch(
-        "sys.argv", ["mcpvectordb-ingest"]
+    with (
+        pytest.raises(SystemExit) as exc_info,
+        patch("sys.argv", ["mcpvectordb-ingest"]),
     ):
         main()
     assert exc_info.value.code == 2
 
 
 # ── (a) Single file ────────────────────────────────────────────────────────────
+
 
 @pytest.mark.unit
 def test_cli_single_file_success_exits_zero(tmp_path, monkeypatch, _mock_models):
@@ -115,15 +120,18 @@ def test_cli_single_file_success_exits_zero(tmp_path, monkeypatch, _mock_models)
 
     monkeypatch.setattr(cli_mod, "ingest", _fake_ingest)
 
-    with pytest.raises(SystemExit) as exc_info, patch(
-        "sys.argv", ["mcpvectordb-ingest", str(doc)]
+    with (
+        pytest.raises(SystemExit) as exc_info,
+        patch("sys.argv", ["mcpvectordb-ingest", str(doc)]),
     ):
         cli_mod.main()
     assert exc_info.value.code == 0
 
 
 @pytest.mark.unit
-def test_cli_single_file_ingest_error_exits_one(tmp_path, monkeypatch, _mock_models, capsys):
+def test_cli_single_file_ingest_error_exits_one(
+    tmp_path, monkeypatch, _mock_models, capsys
+):
     """ingest() raising IngestionError → clean message on stderr, exit 1."""
     import mcpvectordb.cli as cli_mod
 
@@ -135,8 +143,9 @@ def test_cli_single_file_ingest_error_exits_one(tmp_path, monkeypatch, _mock_mod
 
     monkeypatch.setattr(cli_mod, "ingest", _raise)
 
-    with pytest.raises(SystemExit) as exc_info, patch(
-        "sys.argv", ["mcpvectordb-ingest", str(doc)]
+    with (
+        pytest.raises(SystemExit) as exc_info,
+        patch("sys.argv", ["mcpvectordb-ingest", str(doc)]),
     ):
         cli_mod.main()
 
@@ -147,6 +156,7 @@ def test_cli_single_file_ingest_error_exits_one(tmp_path, monkeypatch, _mock_mod
 
 
 # ── (b) Multiple files ────────────────────────────────────────────────────────
+
 
 @pytest.mark.unit
 def test_cli_multiple_files_all_succeed_exits_zero(tmp_path, monkeypatch, _mock_models):
@@ -172,8 +182,9 @@ def test_cli_multiple_files_all_succeed_exits_zero(tmp_path, monkeypatch, _mock_
 
     monkeypatch.setattr(cli_mod, "ingest", _fake_ingest)
 
-    with pytest.raises(SystemExit) as exc_info, patch(
-        "sys.argv", ["mcpvectordb-ingest", str(file_a), str(file_b)]
+    with (
+        pytest.raises(SystemExit) as exc_info,
+        patch("sys.argv", ["mcpvectordb-ingest", str(file_a), str(file_b)]),
     ):
         cli_mod.main()
 
@@ -182,7 +193,9 @@ def test_cli_multiple_files_all_succeed_exits_zero(tmp_path, monkeypatch, _mock_
 
 
 @pytest.mark.unit
-def test_cli_multiple_files_partial_failure_exits_one(tmp_path, monkeypatch, _mock_models):
+def test_cli_multiple_files_partial_failure_exits_one(
+    tmp_path, monkeypatch, _mock_models
+):
     """Two files, one fails → exit 1."""
     import mcpvectordb.cli as cli_mod
 
@@ -198,13 +211,18 @@ def test_cli_multiple_files_partial_failure_exits_one(tmp_path, monkeypatch, _mo
         if call_count["n"] == 2:
             raise IngestionError("bad file")
         return IngestResult(
-            status="indexed", doc_id="d1", source=str(source), library="default", chunk_count=1
+            status="indexed",
+            doc_id="d1",
+            source=str(source),
+            library="default",
+            chunk_count=1,
         )
 
     monkeypatch.setattr(cli_mod, "ingest", _fake_ingest)
 
-    with pytest.raises(SystemExit) as exc_info, patch(
-        "sys.argv", ["mcpvectordb-ingest", str(file_a), str(file_b)]
+    with (
+        pytest.raises(SystemExit) as exc_info,
+        patch("sys.argv", ["mcpvectordb-ingest", str(file_a), str(file_b)]),
     ):
         cli_mod.main()
 
@@ -212,6 +230,7 @@ def test_cli_multiple_files_partial_failure_exits_one(tmp_path, monkeypatch, _mo
 
 
 # ── (c) Folder ────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.unit
 def test_cli_folder_success_exits_zero(tmp_path, monkeypatch, _mock_models):
@@ -225,8 +244,9 @@ def test_cli_folder_success_exits_zero(tmp_path, monkeypatch, _mock_models):
 
     monkeypatch.setattr(cli_mod, "ingest_folder", _fake_ingest_folder)
 
-    with pytest.raises(SystemExit) as exc_info, patch(
-        "sys.argv", ["mcpvectordb-ingest", str(tmp_path)]
+    with (
+        pytest.raises(SystemExit) as exc_info,
+        patch("sys.argv", ["mcpvectordb-ingest", str(tmp_path)]),
     ):
         cli_mod.main()
     assert exc_info.value.code == 0
@@ -244,8 +264,9 @@ def test_cli_folder_with_failures_exits_one(tmp_path, monkeypatch, _mock_models)
 
     monkeypatch.setattr(cli_mod, "ingest_folder", _fake_ingest_folder)
 
-    with pytest.raises(SystemExit) as exc_info, patch(
-        "sys.argv", ["mcpvectordb-ingest", str(tmp_path)]
+    with (
+        pytest.raises(SystemExit) as exc_info,
+        patch("sys.argv", ["mcpvectordb-ingest", str(tmp_path)]),
     ):
         cli_mod.main()
     assert exc_info.value.code == 1
@@ -256,8 +277,9 @@ def test_cli_nonexistent_path_exits_one(tmp_path, monkeypatch, _mock_models, cap
     """Path that doesn't exist → 'Error:' on stderr, exit 1."""
     import mcpvectordb.cli as cli_mod
 
-    with pytest.raises(SystemExit) as exc_info, patch(
-        "sys.argv", ["mcpvectordb-ingest", "/nonexistent/path"]
+    with (
+        pytest.raises(SystemExit) as exc_info,
+        patch("sys.argv", ["mcpvectordb-ingest", "/nonexistent/path"]),
     ):
         cli_mod.main()
 
@@ -277,8 +299,9 @@ def test_cli_folder_ingest_error_exits_one(tmp_path, monkeypatch, _mock_models, 
 
     monkeypatch.setattr(cli_mod, "ingest_folder", _raise)
 
-    with pytest.raises(SystemExit) as exc_info, patch(
-        "sys.argv", ["mcpvectordb-ingest", str(tmp_path)]
+    with (
+        pytest.raises(SystemExit) as exc_info,
+        patch("sys.argv", ["mcpvectordb-ingest", str(tmp_path)]),
     ):
         cli_mod.main()
 
@@ -289,6 +312,7 @@ def test_cli_folder_ingest_error_exits_one(tmp_path, monkeypatch, _mock_models, 
 
 
 # ── Mixed paths ───────────────────────────────────────────────────────────────
+
 
 @pytest.mark.unit
 def test_cli_mixed_file_and_folder_success(tmp_path, monkeypatch, _mock_models):
@@ -311,8 +335,9 @@ def test_cli_mixed_file_and_folder_success(tmp_path, monkeypatch, _mock_models):
     monkeypatch.setattr(cli_mod, "ingest", _fake_ingest)
     monkeypatch.setattr(cli_mod, "ingest_folder", _fake_ingest_folder)
 
-    with pytest.raises(SystemExit) as exc_info, patch(
-        "sys.argv", ["mcpvectordb-ingest", str(doc), str(subdir)]
+    with (
+        pytest.raises(SystemExit) as exc_info,
+        patch("sys.argv", ["mcpvectordb-ingest", str(doc), str(subdir)]),
     ):
         cli_mod.main()
 
