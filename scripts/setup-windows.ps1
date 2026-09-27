@@ -98,7 +98,7 @@ foreach ($Dir in @($LanceDir, $ModelsDir)) {
 
 Write-Step "Generating .env..."
 
-$EnvFile = Join-Path $PSScriptRoot ".." ".env"
+$EnvFile = Join-Path (Join-Path $PSScriptRoot "..") ".env"
 $EnvFile = [System.IO.Path]::GetFullPath($EnvFile)
 
 if (Test-Path $EnvFile) {
@@ -129,7 +129,7 @@ Write-Step "Claude Desktop configuration"
 $ProjectDir = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 
 # Claude Desktop config file location on Windows
-$ClaudeConfig = Join-Path $env:APPDATA "Claude" "claude_desktop_config.json"
+$ClaudeConfig = Join-Path (Join-Path $env:APPDATA "Claude") "claude_desktop_config.json"
 
 Write-Host ""
 Write-Host "  Paste the following into:" -ForegroundColor Yellow

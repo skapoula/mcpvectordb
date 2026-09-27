@@ -116,7 +116,7 @@ foreach ($Dir in @($LanceDir, $ModelsDir)) {
 
 Write-Step "Generating .env..."
 
-$EnvFile = Join-Path $PSScriptRoot ".." ".env"
+$EnvFile = Join-Path (Join-Path $PSScriptRoot "..") ".env"
 $EnvFile = [System.IO.Path]::GetFullPath($EnvFile)
 
 if (Test-Path $EnvFile) {
