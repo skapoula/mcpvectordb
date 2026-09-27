@@ -13,10 +13,11 @@ See [docs/README.md](docs/README.md) for the full guide index.
 
 ## Quick Start
 
-1. Install dependencies:
+1. Install dependencies, then download the embedding model and tokenizer (~500 MB, one-time; the server will not start without them):
 
 ```bash
 uv sync
+uv run mcpvectordb-download-model
 ```
 
 2. Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
