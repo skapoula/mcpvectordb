@@ -36,16 +36,16 @@ RUN uv pip install --system .
 # the model in config.py (must match EMBEDDING_MODEL in your .env).
 ARG EMBEDDING_MODEL=nomic-ai/nomic-embed-text-v1.5
 
-RUN FASTEMBED_CACHE_PATH=/opt/models python -c \
-    "from fastembed import TextEmbedding; TextEmbedding(model_name='${EMBEDDING_MODEL}')" \
-    && echo "Model baked in at /opt/models"
+# The chunker's tokenizer is required at startup too; it goes to HF_HOME.
+RUN FASTEMBED_CACHE_PATH=/opt/models HF_HOME=/opt/models/hf \
+    EMBEDDING_MODEL=${EMBEDDING_MODEL} mcpvectordb-download-model
 
 # ── Volumes ───────────────────────────────────────────────────────────────────
 # /data/lancedb — vector store (Docker named volume or k3s PVC)
 # /data/docs    — source documents for ingest_file (bind-mount, read-only)
 # /certs        — read-only bind mount for TLS cert+key (Mode D / TLS_ENABLED=true only).
 #                 Mount with: -v ./certs:/certs:ro  or via compose Mode D volume block.
-# No model-cache volume — the ONNX model is baked into the image at /opt/models.
+# No model-cache volume — the ONNX model and tokenizer are baked in at /opt/models.
 VOLUME ["/data/lancedb", "/data/docs"]
 
 # ── Runtime environment ───────────────────────────────────────────────────────
@@ -54,13 +54,17 @@ ENV MCP_TRANSPORT=streamable-http \
     MCP_HOST=0.0.0.0 \
     MCP_PORT=8000 \
     LANCEDB_URI=/data/lancedb \
-    FASTEMBED_CACHE_PATH=/opt/models
+    FASTEMBED_CACHE_PATH=/opt/models \
+    HF_HOME=/opt/models/hf
 
 EXPOSE 8000
 
 # ── Health check ─────────────────────────────────────────────────────────────
+# TCP connect, not HTTP: there is no route at / and /mcp needs MCP headers (and a
+# token with OAUTH_ENABLED, TLS with TLS_ENABLED). The port only opens after both
+# models are loaded, so an open port means ready.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:8000/ || exit 1
+    CMD python -c "import os, socket; socket.create_connection(('localhost', int(os.environ.get('MCP_PORT', 8000))), 5)"
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 ENTRYPOINT ["mcpvectordb"]

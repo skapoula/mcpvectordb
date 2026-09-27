@@ -15,10 +15,11 @@ git clone <your-fork-url> mcpvectordb
 cd mcpvectordb
 ```
 
-2. Install all dependencies (including dev tools):
+2. Install all dependencies (including dev tools), then download the embedding model and tokenizer (~500 MB, one-time):
 
 ```bash
 uv sync
+uv run mcpvectordb-download-model
 ```
 
 3. Copy the example config:

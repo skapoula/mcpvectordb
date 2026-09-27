@@ -14,14 +14,15 @@ Claude Desktop runs mcpvectordb as a subprocess. All data stays on your machine.
 1. Clone the repository:
 
 ```bash
-git clone <repo-url> mcpvectordb
+git clone https://github.com/skapoula/mcpvectordb.git
 cd mcpvectordb
 ```
 
-2. Install dependencies:
+2. Install dependencies, then download the embedding model and tokenizer (~500 MB, one-time; the server will not start without them):
 
 ```bash
 uv sync
+uv run mcpvectordb-download-model
 ```
 
 3. Copy the example config and set your database path:
