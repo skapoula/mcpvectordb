@@ -1,12 +1,10 @@
 """Unit tests for GoogleTokenVerifier in auth.py."""
 
 import time
-from unittest.mock import patch
 
 import pytest
 
-from mcpvectordb.auth import CACHE_TTL_SECONDS, GoogleTokenVerifier
-
+from mcpvectordb.auth import GoogleTokenVerifier
 
 CLIENT_ID = "test-client.apps.googleusercontent.com"
 VALID_TOKEN = "valid-google-access-token"
@@ -38,9 +36,7 @@ class TestGoogleTokenVerifier:
             url=f"{TOKENINFO_URL}?access_token={VALID_TOKEN}",
             json=_tokeninfo_response(),
         )
-        verifier = GoogleTokenVerifier(
-            client_id=CLIENT_ID, allowed_emails=[]
-        )
+        verifier = GoogleTokenVerifier(client_id=CLIENT_ID, allowed_emails=[])
         result = await verifier.verify_token(VALID_TOKEN)
 
         assert result is not None

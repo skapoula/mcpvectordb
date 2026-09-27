@@ -3,16 +3,22 @@
 import json
 import logging
 import re
+import threading
+from datetime import timedelta
 from pathlib import Path
 
 import lancedb
 import numpy as np
+import pyarrow as pa
 from pydantic import BaseModel
 
 from mcpvectordb.config import settings
 from mcpvectordb.exceptions import StoreError
 
 logger = logging.getLogger(__name__)
+
+# Every write creates a table version; compact and prune after this many upserts.
+_OPTIMIZE_EVERY = 50
 
 
 class ChunkRecord(BaseModel):
@@ -34,6 +40,34 @@ class ChunkRecord(BaseModel):
     page: int  # 1-indexed page number; 0 = unknown or not applicable
 
 
+def _lance_schema() -> pa.Schema:
+    """Return the canonical Arrow schema for the documents table.
+
+    Uses explicit types so the schema is never inferred from Python literals,
+    which prevents dimension-mismatch bugs when environment variables override
+    settings between runs.
+    """
+    dim = settings.embedding_dimension
+    return pa.schema(
+        [
+            pa.field("id", pa.string()),
+            pa.field("doc_id", pa.string()),
+            pa.field("library", pa.string()),
+            pa.field("source", pa.string()),
+            pa.field("content_hash", pa.string()),
+            pa.field("title", pa.string()),
+            pa.field("content", pa.string()),
+            pa.field("embedding", pa.list_(pa.float32(), dim)),
+            pa.field("chunk_index", pa.int64()),
+            pa.field("created_at", pa.string()),
+            pa.field("metadata", pa.string()),
+            pa.field("file_type", pa.string()),
+            pa.field("last_modified", pa.string()),
+            pa.field("page", pa.int64()),
+        ]
+    )
+
+
 def _open_table(uri: str, table_name: str) -> lancedb.table.Table:
     """Open (or create) the LanceDB table.
 
@@ -45,7 +79,8 @@ def _open_table(uri: str, table_name: str) -> lancedb.table.Table:
         An open LanceDB Table object.
 
     Raises:
-        StoreError: If the connection or table open fails.
+        StoreError: If the connection or table open fails, or if the existing
+            table's embedding dimension does not match settings.embedding_dimension.
     """
     try:
         # Expand ~ for local paths
@@ -57,40 +92,84 @@ def _open_table(uri: str, table_name: str) -> lancedb.table.Table:
         )
         if table_name in existing:
             table = db.open_table(table_name)
+            _validate_embedding_dimension(table)
             _migrate_table(table)
         else:
-            # Create table with a dummy record to establish schema, then delete it
-            schema_record = {
-                "id": "_schema_init_",
-                "doc_id": "",
-                "library": "",
-                "source": "",
-                "content_hash": "",
-                "title": "",
-                "content": "",
-                "embedding": [0.0] * settings.embedding_dimension,
-                "chunk_index": 0,
-                "created_at": "",
-                "metadata": "{}",
-                "file_type": "",
-                "last_modified": "",
-                "page": 0,
-            }
-            table = db.create_table(table_name, data=[schema_record])
-            table.delete("id = '_schema_init_'")
-        # Create scalar indexes on commonly filtered columns (idempotent)
-        for col in ("library", "doc_id", "source"):
-            try:
-                table.create_scalar_index(col, replace=True)
-            except Exception:
-                logger.debug(
-                    "Scalar index on %r not created (may need data first)", col
-                )
+            # Create table with an explicit PyArrow schema — no dummy record needed.
+            table = db.create_table(table_name, schema=_lance_schema())
         return table
+    except StoreError:
+        raise
     except Exception as e:
         raise StoreError(
             f"Failed to open LanceDB table {table_name!r} at {uri!r}"
         ) from e
+
+
+def _ensure_scalar_indexes(table: lancedb.table.Table) -> None:
+    """Create scalar indexes on commonly filtered columns (idempotent).
+
+    Called once per Store instance after the table is first opened. Scalar indexes
+    require at least one row to be created; failures are logged as warnings rather
+    than silently ignored.
+
+    Args:
+        table: Open LanceDB table to index.
+    """
+    for col in ("library", "doc_id", "source"):
+        try:
+            table.create_scalar_index(col, replace=True)
+        except Exception as e:
+            logger.warning(
+                "Scalar index on %r not created (filters still work, unindexed): %s",
+                col,
+                e,
+            )
+
+
+def _ensure_fts_index(table: lancedb.table.Table) -> None:
+    """Create the BM25 index on 'content' if it does not exist yet.
+
+    Built once: the native index also matches rows written after it was built
+    and drops deleted rows, so rebuilding on every write is unnecessary.
+    Compaction (Store.optimize) folds new rows into the index.
+
+    Args:
+        table: Open LanceDB table with at least one row.
+    """
+    if any(ix.index_type == "FTS" for ix in table.list_indices()):
+        return
+    try:
+        table.create_fts_index("content")
+        logger.debug("FTS index created on 'content'")
+    except Exception as e:
+        logger.warning("FTS index creation failed (hybrid search degraded): %s", e)
+
+
+def _validate_embedding_dimension(table: lancedb.table.Table) -> None:
+    """Raise StoreError if the stored embedding dimension differs from settings.
+
+    Args:
+        table: Open LanceDB table to validate.
+
+    Raises:
+        StoreError: If the dimension in the stored schema differs from
+            settings.embedding_dimension.
+    """
+    try:
+        field = table.schema.field("embedding")
+        stored_dim = field.type.list_size
+    except Exception:
+        return  # can't determine — skip validation
+
+    expected = settings.embedding_dimension
+    if stored_dim != expected:
+        raise StoreError(
+            f"Embedding dimension mismatch: the existing index stores {stored_dim}d "
+            f"vectors but EMBEDDING_DIMENSION={expected}. "
+            "Either restore the original EMBEDDING_DIMENSION value or delete the index "
+            "and re-ingest all documents."
+        )
 
 
 def _migrate_table(table: lancedb.table.Table) -> None:
@@ -172,10 +251,18 @@ class Store:
         """
         self._uri = uri or settings.lancedb_uri
         self._table_name = table_name or settings.lancedb_table_name
+        self._indexes_created = False
+        self._fts_ready = False
+        self._writes = 0
+        self._optimize_lock = threading.Lock()
 
     def _table(self) -> lancedb.table.Table:
-        """Open and return the LanceDB table."""
-        return _open_table(self._uri, self._table_name)
+        """Open and return the LanceDB table, creating scalar indexes on first call."""
+        table = _open_table(self._uri, self._table_name)
+        if not self._indexes_created:
+            _ensure_scalar_indexes(table)
+            self._indexes_created = True
+        return table
 
     def upsert_chunks(self, chunks: list[ChunkRecord]) -> None:
         """Write a list of chunk records to the store.
@@ -191,17 +278,40 @@ class Store:
         try:
             table = self._table()
             rows = [c.model_dump() for c in chunks]
+            # Convert embeddings to float32 numpy arrays to satisfy the
+            # FixedSizeList<float32> Arrow schema — Python lists are typed as
+            # ListType and only cast correctly when the sizes match, while numpy
+            # arrays are always unambiguous.
+            for row in rows:
+                row["embedding"] = np.array(row["embedding"], dtype=np.float32)
             table.add(rows)
             logger.info("Upserted %d chunks (doc_id=%s)", len(chunks), chunks[0].doc_id)
-            try:
-                table.create_fts_index("content", replace=True)
-                logger.debug("FTS index rebuilt on 'content'")
-            except Exception as fts_err:
-                logger.warning(
-                    "FTS index rebuild failed (hybrid search degraded): %s", fts_err
-                )
+            if not self._fts_ready:
+                _ensure_fts_index(table)
+                self._fts_ready = True
+            self._writes += 1
+            if self._writes % _OPTIMIZE_EVERY == 0:
+                self.optimize()
         except Exception as e:
             raise StoreError(f"Failed to upsert {len(chunks)} chunks") from e
+
+    def optimize(self, cleanup_older_than: timedelta = timedelta(minutes=1)) -> None:
+        """Compact data files, fold new rows into indexes, and prune old versions.
+
+        Failures are logged, not raised: the data is already written and a
+        missed compaction only costs disk space and some search speed.
+
+        Args:
+            cleanup_older_than: Delete versions older than this.
+        """
+        # ponytail: 1-minute grace so a concurrent reader's version survives;
+        # raise it if long-running queries ever hit missing files.
+        with self._optimize_lock:
+            try:
+                self._table().optimize(cleanup_older_than=cleanup_older_than)
+                logger.debug("Optimized table %r", self._table_name)
+            except Exception as e:
+                logger.warning("Table optimize failed (disk not reclaimed): %s", e)
 
     def find_existing(self, source: str, library: str) -> tuple[str | None, str | None]:
         """Look up an existing document by (source, library) dedup key.
@@ -223,6 +333,7 @@ class Store:
             safe_library = library.replace("'", "''")
             results = (
                 table.search()
+                .select(["doc_id", "content_hash"])
                 .where(f"source = '{safe_source}' AND library = '{safe_library}'")
                 .limit(1)
                 .to_list()
@@ -249,14 +360,42 @@ class Store:
         try:
             table = self._table()
             safe_id = doc_id.replace("'", "''")
+            # count_rows() snapshots are non-atomic: concurrent writes between the
+            # two calls can make the delta wrong, but this is acceptable for a
+            # single-user server where exact counts are informational only.
             before = table.count_rows()
             table.delete(f"doc_id = '{safe_id}'")
             after = table.count_rows()
-            deleted = before - after
+            deleted = int(before - after)
             logger.info("Deleted %d chunks for doc_id=%s", deleted, doc_id)
             return deleted
         except Exception as e:
             raise StoreError(f"Failed to delete document {doc_id!r}") from e
+
+    def _vector_search(
+        self,
+        table: lancedb.table.Table,
+        embedding: list[float],
+        where: str | None,
+        top_k: int,
+    ) -> list[dict]:
+        """Run a pure vector (ANN) search against an open table.
+
+        Args:
+            table: Open LanceDB table.
+            embedding: Query vector.
+            where: Optional SQL WHERE clause string.
+            top_k: Maximum number of results to return.
+
+        Returns:
+            Raw row dicts from LanceDB.
+        """
+        q = table.search(np.array(embedding, dtype=np.float32))
+        if where is not None:
+            q = q.where(where)
+        return list(
+            q.refine_factor(settings.search_refine_factor).limit(top_k).to_list()
+        )
 
     def search(
         self,
@@ -291,10 +430,13 @@ class Store:
             table = self._table()
             where = _build_where_clause(library, filter)
 
-            try:
-                if settings.hybrid_search_enabled:
-                    query = table.search(query_text, query_type="hybrid").vector(
-                        np.array(embedding, dtype=np.float32)
+            rows: list[dict] = []
+            if settings.hybrid_search_enabled:
+                try:
+                    query = (
+                        table.search(query_type="hybrid")
+                        .vector(np.array(embedding, dtype=np.float32))
+                        .text(query_text)
                     )
                     if where is not None:
                         query = query.where(where)
@@ -303,26 +445,20 @@ class Store:
                         .limit(top_k)
                         .to_list()
                     )
-                else:
-                    raise ValueError("hybrid disabled")
-            except Exception as hybrid_err:
-                if settings.hybrid_search_enabled:
+                except Exception as hybrid_err:
                     logger.warning(
                         "Hybrid search fell back to vector-only: %s", hybrid_err
                     )
-                q = table.search(np.array(embedding, dtype=np.float32))
-                if where is not None:
-                    q = q.where(where)
-                rows = (
-                    q.refine_factor(settings.search_refine_factor)
-                    .limit(top_k)
-                    .to_list()
-                )
+                    rows = self._vector_search(table, embedding, where, top_k)
+            else:
+                rows = self._vector_search(table, embedding, where, top_k)
 
             return [
                 ChunkRecord(**{k: v for k, v in row.items() if k != "_distance"})
                 for row in rows
             ]
+        except StoreError:
+            raise
         except Exception as e:
             raise StoreError("Search failed") from e
 
@@ -373,10 +509,24 @@ class Store:
         """
         try:
             table = self._table()
-            q = table.search()
+            # Never fetch embeddings or chunk text here: reading every column of
+            # every row made this ~100x slower (2.7 s vs 22 ms at 6k rows).
+            q = table.search().select(
+                [
+                    "doc_id",
+                    "source",
+                    "title",
+                    "library",
+                    "content_hash",
+                    "created_at",
+                    "metadata",
+                ]
+            )
             if library is not None:
                 safe_lib = library.replace("'", "''")
                 q = q.where(f"library = '{safe_lib}'")
+            # LanceDB has no server-side GROUP BY; all rows are fetched and
+            # aggregated in Python. limit/offset are applied after aggregation.
             rows = q.to_list()
 
             # Group by doc_id — keep first occurrence for metadata
@@ -413,7 +563,9 @@ class Store:
         """
         try:
             table = self._table()
-            rows = table.search().to_list()
+            # LanceDB has no server-side GROUP BY; all rows are fetched and
+            # aggregated in Python.
+            rows = table.search().select(["library", "doc_id"]).to_list()
 
             libs: dict[str, dict] = {}
             for row in rows:
@@ -428,15 +580,17 @@ class Store:
                 libs[lib]["chunk_count"] += 1
                 libs[lib]["_docs"].add(row["doc_id"])
 
-            result = []
-            for lib_data in libs.values():
-                result.append(
+            result = sorted(
+                [
                     {
                         "library": lib_data["library"],
                         "document_count": len(lib_data["_docs"]),
                         "chunk_count": lib_data["chunk_count"],
                     }
-                )
+                    for lib_data in libs.values()
+                ],
+                key=lambda d: d["library"],
+            )
             return result
         except Exception as e:
             raise StoreError("list_libraries failed") from e

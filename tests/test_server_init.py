@@ -15,7 +15,7 @@ class TestServerModuleInit:
 
     @pytest.mark.unit
     def test_file_handler_added_when_log_file_configured(self, tmp_path, monkeypatch):
-        """FileHandler is appended to _log_handlers when settings.log_file is set (line 20).
+        """FileHandler is appended to _log_handlers when settings.log_file is set.
 
         Uses importlib.reload to re-execute module-level init with the patched setting.
         """
@@ -30,7 +30,8 @@ class TestServerModuleInit:
 
         try:
             file_handlers = [
-                h for h in server_mod._log_handlers
+                h
+                for h in server_mod._log_handlers
                 if isinstance(h, logging.FileHandler)
             ]
             assert len(file_handlers) >= 1

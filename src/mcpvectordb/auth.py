@@ -1,5 +1,6 @@
 """Google OAuth token verification for mcpvectordb (Resource Server mode)."""
 
+import contextlib
 import hashlib
 import logging
 import time
@@ -99,10 +100,9 @@ class GoogleTokenVerifier:
         expires_in_str = data.get("expires_in")
         expires_at: int | None = None
         if expires_in_str is not None:
-            try:
+            # A malformed expires_in means "no expiry info", not an invalid token.
+            with contextlib.suppress(ValueError, TypeError):
                 expires_at = int(time.time()) + int(expires_in_str)
-            except (ValueError, TypeError):
-                pass
 
         scopes_str = data.get("scope", "")
         scopes = scopes_str.split() if scopes_str else []

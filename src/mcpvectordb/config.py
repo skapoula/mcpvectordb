@@ -57,7 +57,9 @@ class Settings(BaseSettings):
 
     # Search
     hybrid_search_enabled: bool = True  # BM25 + vector; disable for pure vector mode
-    search_refine_factor: int = 10  # re-rank top N*refine_factor exact results for recall
+    search_refine_factor: int = (
+        10  # re-rank top N*refine_factor exact results for recall
+    )
 
     # Chunking
     chunk_size_tokens: int = 512
@@ -93,7 +95,9 @@ class Settings(BaseSettings):
     oauth_enabled: bool = False
     oauth_client_id: str | None = None  # Google OAuth 2.0 client_id
     oauth_resource_url: str | None = None  # Public URL of this server
-    oauth_allowed_emails: str = ""  # Comma-separated; empty = any authenticated Google user
+    oauth_allowed_emails: str = (
+        ""  # Comma-separated; empty = any authenticated Google user
+    )
 
     @property
     def oauth_allowed_emails_list(self) -> list[str]:
@@ -101,6 +105,9 @@ class Settings(BaseSettings):
         return [e.strip() for e in self.oauth_allowed_emails.split(",") if e.strip()]
 
     # URL fetching
+    # On network transports ingest_url refuses hosts that resolve to private,
+    # loopback, link-local or reserved addresses (SSRF). stdio is exempt.
+    allow_private_urls: bool = False
     http_timeout_seconds: float = 10.0
     http_user_agent: str = "mcpvectordb/1.0"
 

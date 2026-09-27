@@ -9,6 +9,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from mcpvectordb.config import settings
+from mcpvectordb.exceptions import ConfigurationError
 
 
 def run(coro):
@@ -90,8 +91,10 @@ class TestIngestFileTool:
         assert "error" in result
 
     @pytest.mark.unit
-    def test_ingest_file_ingestion_error_returns_error_dict(self, tmp_path, monkeypatch):
-        """IngestionError from the pipeline returns a structured error dict (lines 64-65)."""
+    def test_ingest_file_ingestion_error_returns_error_dict(
+        self, tmp_path, monkeypatch
+    ):
+        """IngestionError from the pipeline returns a structured error dict."""
         from mcpvectordb import server
         from mcpvectordb.exceptions import IngestionError
 
@@ -108,8 +111,10 @@ class TestIngestFileTool:
         assert "Ingestion failed" in result["error"]
 
     @pytest.mark.unit
-    def test_ingest_file_unexpected_exception_returns_error_dict(self, tmp_path, monkeypatch):
-        """Unexpected exception returns a structured error dict (lines 66-68)."""
+    def test_ingest_file_unexpected_exception_returns_error_dict(
+        self, tmp_path, monkeypatch
+    ):
+        """Unexpected exception returns a structured error dict."""
         from mcpvectordb import server
 
         async def _raise(*args, **kwargs):
@@ -191,7 +196,7 @@ class TestIngestUrlTool:
 
     @pytest.mark.unit
     def test_ingest_url_unexpected_exception_returns_error_dict(self, monkeypatch):
-        """Unexpected exception in ingest_url returns a structured error dict (lines 103-105)."""
+        """Unexpected exception in ingest_url returns a structured error dict."""
         from mcpvectordb import server
 
         async def _raise(*args, **kwargs):
@@ -209,7 +214,7 @@ class TestIngestContentTool:
 
     @pytest.mark.unit
     def test_returns_indexed_on_new_content(self, monkeypatch):
-        """ingest_content returns status='indexed' with doc_id and chunk_count on new content."""
+        """New content returns status='indexed' with doc_id and chunk_count."""
         from mcpvectordb import server
         from mcpvectordb.ingestor import IngestResult
 
@@ -231,7 +236,7 @@ class TestIngestContentTool:
 
     @pytest.mark.unit
     def test_returns_skipped_for_duplicate(self, monkeypatch):
-        """ingest_content returns status='skipped' and chunk_count=0 for duplicate content."""
+        """Duplicate content returns status='skipped' and chunk_count=0."""
         from mcpvectordb import server
         from mcpvectordb.ingestor import IngestResult
 
@@ -266,14 +271,16 @@ class TestIngestContentTool:
             )
 
         monkeypatch.setattr("mcpvectordb.server._ingest_content", _fake)
-        result = run(server.ingest_content(content="Updated content", source="test.txt"))
+        result = run(
+            server.ingest_content(content="Updated content", source="test.txt")
+        )
 
         assert result["status"] == "replaced"
         assert "doc_id" in result
 
     @pytest.mark.unit
     def test_empty_content_returns_error(self):
-        """Empty or whitespace-only content returns an error dict without calling _ingest_content."""
+        """Empty or blank content returns an error without calling _ingest_content."""
         from mcpvectordb import server
 
         result_empty = run(server.ingest_content(content="", source="test.txt"))
@@ -381,7 +388,9 @@ class TestSearchTool:
         )
         # Patch get_embedder to return a mock
         mock_emb = MagicMock()
-        mock_emb.embed_query.return_value = np.random.rand(settings.embedding_dimension).astype(np.float32)
+        mock_emb.embed_query.return_value = np.random.rand(
+            settings.embedding_dimension
+        ).astype(np.float32)
         monkeypatch.setattr("mcpvectordb.server.get_embedder", lambda: mock_emb)
 
         result = run(server.search(query="machine learning", top_k=5))
@@ -390,7 +399,7 @@ class TestSearchTool:
 
     @pytest.mark.unit
     def test_search_store_error_returns_error(self, monkeypatch):
-        """StoreError from the store returns a structured error dict (lines 157-158)."""
+        """StoreError from the store returns a structured error dict."""
         from mcpvectordb import server
         from mcpvectordb.exceptions import StoreError
 
@@ -399,7 +408,9 @@ class TestSearchTool:
         monkeypatch.setattr("mcpvectordb.server._store", bad_store)
 
         mock_emb = MagicMock()
-        mock_emb.embed_query.return_value = np.random.rand(settings.embedding_dimension).astype(np.float32)
+        mock_emb.embed_query.return_value = np.random.rand(
+            settings.embedding_dimension
+        ).astype(np.float32)
         monkeypatch.setattr("mcpvectordb.server.get_embedder", lambda: mock_emb)
 
         result = run(server.search(query="test query"))
@@ -408,7 +419,7 @@ class TestSearchTool:
 
     @pytest.mark.unit
     def test_search_unexpected_exception_returns_error(self, monkeypatch):
-        """Unexpected exception in search returns a structured error dict (lines 159-161)."""
+        """Unexpected exception in search returns a structured error dict."""
         from mcpvectordb import server
 
         bad_store = MagicMock()
@@ -416,7 +427,9 @@ class TestSearchTool:
         monkeypatch.setattr("mcpvectordb.server._store", bad_store)
 
         mock_emb = MagicMock()
-        mock_emb.embed_query.return_value = np.random.rand(settings.embedding_dimension).astype(np.float32)
+        mock_emb.embed_query.return_value = np.random.rand(
+            settings.embedding_dimension
+        ).astype(np.float32)
         monkeypatch.setattr("mcpvectordb.server.get_embedder", lambda: mock_emb)
 
         result = run(server.search(query="test query"))
@@ -454,7 +467,7 @@ class TestListDocumentsTool:
 
     @pytest.mark.unit
     def test_list_documents_store_error_returns_error(self, monkeypatch):
-        """StoreError from list_documents returns a structured error dict (lines 188-189)."""
+        """StoreError from list_documents returns a structured error dict."""
         from mcpvectordb import server
         from mcpvectordb.exceptions import StoreError
 
@@ -468,7 +481,7 @@ class TestListDocumentsTool:
 
     @pytest.mark.unit
     def test_list_documents_unexpected_exception_returns_error(self, monkeypatch):
-        """Unexpected exception in list_documents returns a structured error dict (lines 190-192)."""
+        """Unexpected exception in list_documents returns a structured error dict."""
         from mcpvectordb import server
 
         bad_store = MagicMock()
@@ -494,7 +507,7 @@ class TestListLibrariesTool:
 
     @pytest.mark.unit
     def test_list_libraries_store_error_returns_error(self, monkeypatch):
-        """StoreError from list_libraries returns a structured error dict (lines 206-207)."""
+        """StoreError from list_libraries returns a structured error dict."""
         from mcpvectordb import server
         from mcpvectordb.exceptions import StoreError
 
@@ -508,7 +521,7 @@ class TestListLibrariesTool:
 
     @pytest.mark.unit
     def test_list_libraries_unexpected_exception_returns_error(self, monkeypatch):
-        """Unexpected exception in list_libraries returns a structured error dict (lines 208-210)."""
+        """Unexpected exception in list_libraries returns a structured error dict."""
         from mcpvectordb import server
 
         bad_store = MagicMock()
@@ -542,7 +555,7 @@ class TestDeleteDocumentTool:
 
     @pytest.mark.unit
     def test_delete_document_store_error_returns_error(self, monkeypatch):
-        """StoreError from delete_document returns a structured error dict (lines 229-230)."""
+        """StoreError from delete_document returns a structured error dict."""
         from mcpvectordb import server
         from mcpvectordb.exceptions import StoreError
 
@@ -556,7 +569,7 @@ class TestDeleteDocumentTool:
 
     @pytest.mark.unit
     def test_delete_document_unexpected_exception_returns_error(self, monkeypatch):
-        """Unexpected exception in delete_document returns a structured error dict (lines 231-233)."""
+        """Unexpected exception in delete_document returns a structured error dict."""
         from mcpvectordb import server
 
         bad_store = MagicMock()
@@ -590,7 +603,7 @@ class TestGetDocumentTool:
 
     @pytest.mark.integration
     def test_get_document_returns_full_content(self, _use_tmp_store):
-        """get_document returns content and metadata for an existing document (lines 255-265)."""
+        """get_document returns content and metadata for an existing document."""
         import json
         import uuid
         from datetime import UTC, datetime
@@ -627,7 +640,7 @@ class TestGetDocumentTool:
 
     @pytest.mark.unit
     def test_get_document_store_error_returns_error(self, monkeypatch):
-        """StoreError from get_document returns a structured error dict (lines 266-267)."""
+        """StoreError from get_document returns a structured error dict."""
         from mcpvectordb import server
         from mcpvectordb.exceptions import StoreError
 
@@ -641,7 +654,7 @@ class TestGetDocumentTool:
 
     @pytest.mark.unit
     def test_get_document_unexpected_exception_returns_error(self, monkeypatch):
-        """Unexpected exception in get_document returns a structured error dict (lines 268-270)."""
+        """Unexpected exception in get_document returns a structured error dict."""
         from mcpvectordb import server
 
         bad_store = MagicMock()
@@ -707,11 +720,12 @@ class TestRequireGoogleAuth:
     @pytest.mark.unit
     def test_returns_401_for_unauthenticated_request(self):
         """Unauthenticated request to a non-well-known path gets 401."""
-        from mcpvectordb.server import _RequireGoogleAuth
         from starlette.applications import Starlette
         from starlette.requests import Request as StarletteRequest
         from starlette.responses import PlainTextResponse
         from starlette.routing import Route
+
+        from mcpvectordb.server import _RequireGoogleAuth
 
         def homepage(request: StarletteRequest):
             return PlainTextResponse("ok")
@@ -725,11 +739,12 @@ class TestRequireGoogleAuth:
     @pytest.mark.unit
     def test_well_known_passes_without_auth(self):
         """/.well-known/* requests bypass the auth check."""
-        from mcpvectordb.server import _RequireGoogleAuth
         from starlette.applications import Starlette
         from starlette.requests import Request as StarletteRequest
         from starlette.responses import PlainTextResponse
         from starlette.routing import Route
+
+        from mcpvectordb.server import _RequireGoogleAuth
 
         def well_known(request: StarletteRequest):
             return PlainTextResponse("metadata")
@@ -747,13 +762,14 @@ class TestRequireGoogleAuth:
         """Requests with is_authenticated=True on user are forwarded."""
         from typing import Any as TypingAny
 
-        from mcpvectordb.server import _RequireGoogleAuth
         from starlette.applications import Starlette
         from starlette.authentication import SimpleUser
         from starlette.requests import Request as StarletteRequest
         from starlette.responses import PlainTextResponse
         from starlette.routing import Route
         from starlette.types import Receive, Scope, Send
+
+        from mcpvectordb.server import _RequireGoogleAuth
 
         class _AuthenticatedUser(SimpleUser):
             is_authenticated = True
@@ -810,7 +826,7 @@ class TestValidateOAuthConfig:
 
     @pytest.mark.unit
     def test_missing_client_id_raises(self, monkeypatch):
-        """OAUTH_ENABLED=true without client_id raises ValueError."""
+        """OAUTH_ENABLED=true without client_id raises ConfigurationError."""
         import mcpvectordb.config as config_mod
         from mcpvectordb.server import _validate_oauth_config
 
@@ -818,12 +834,12 @@ class TestValidateOAuthConfig:
         monkeypatch.setattr(config_mod.settings, "mcp_transport", "streamable-http")
         monkeypatch.setattr(config_mod.settings, "oauth_client_id", None)
 
-        with pytest.raises(ValueError, match="OAUTH_CLIENT_ID"):
+        with pytest.raises(ConfigurationError, match="OAUTH_CLIENT_ID"):
             _validate_oauth_config()
 
     @pytest.mark.unit
     def test_valid_oauth_config_passes(self, monkeypatch):
-        """OAUTH_ENABLED=true with client_id and streamable-http passes without error."""
+        """OAUTH_ENABLED=true with client_id on streamable-http passes."""
         import mcpvectordb.config as config_mod
         from mcpvectordb.server import _validate_oauth_config
 
@@ -842,7 +858,7 @@ class TestFrozenBundleContext:
 
     @pytest.mark.unit
     def test_frozen_sets_fastembed_cache_env_var(self, tmp_path, monkeypatch):
-        """When sys.frozen is True, main() sets FASTEMBED_CACHE_PATH to bundled cache."""
+        """Frozen main() sets FASTEMBED_CACHE_PATH to the bundled cache."""
         import os
 
         import mcpvectordb.config as config_mod
@@ -869,7 +885,7 @@ class TestFrozenBundleContext:
 
     @pytest.mark.unit
     def test_frozen_respects_explicit_env_var(self, tmp_path, monkeypatch):
-        """When FASTEMBED_CACHE_PATH is already set, frozen detection does not override it."""
+        """An explicit FASTEMBED_CACHE_PATH survives frozen detection."""
         import mcpvectordb.config as config_mod
         import mcpvectordb.server as server_mod
 
@@ -891,13 +907,123 @@ class TestFrozenBundleContext:
 
         assert os.environ.get("FASTEMBED_CACHE_PATH") == explicit
 
+    @pytest.mark.unit
+    def test_frozen_bundle_not_overridden_by_default_cache(self, tmp_path, monkeypatch):
+        """The settings default cache path must not replace the bundled model cache."""
+        import os
+
+        import mcpvectordb.config as config_mod
+        import mcpvectordb.server as server_mod
+
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+        monkeypatch.delenv("FASTEMBED_CACHE_PATH", raising=False)
+        monkeypatch.setattr(config_mod.settings, "mcp_transport", "stdio")
+        monkeypatch.setattr(server_mod.mcp, "run", MagicMock())
+        monkeypatch.setattr("mcpvectordb.server.get_embedder", MagicMock())
+        monkeypatch.setattr(
+            config_mod.settings, "lancedb_uri", str(tmp_path / "lancedb")
+        )
+        # Non-None, as Settings' default_factory always produces in real runs.
+        monkeypatch.setattr(
+            config_mod.settings, "fastembed_cache_path", str(tmp_path / "user_models")
+        )
+
+        server_mod.main()
+
+        expected = str(tmp_path / "fastembed_cache")
+        assert os.environ.get("FASTEMBED_CACHE_PATH") == expected
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("explicit", [None, "/custom/hf"])
+    def test_frozen_sets_hf_home_to_bundled_tokenizer(
+        self, tmp_path, monkeypatch, explicit
+    ):
+        """Frozen main() points HF_HOME at the bundled tokenizer unless already set."""
+        import os
+
+        import mcpvectordb.config as config_mod
+        import mcpvectordb.server as server_mod
+
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+        monkeypatch.delenv("FASTEMBED_CACHE_PATH", raising=False)
+        if explicit:
+            monkeypatch.setenv("HF_HOME", explicit)
+        else:
+            monkeypatch.delenv("HF_HOME", raising=False)
+        monkeypatch.setattr(config_mod.settings, "mcp_transport", "stdio")
+        monkeypatch.setattr(server_mod.mcp, "run", MagicMock())
+        monkeypatch.setattr("mcpvectordb.server.get_embedder", MagicMock())
+        monkeypatch.setattr(
+            config_mod.settings, "lancedb_uri", str(tmp_path / "lancedb")
+        )
+        monkeypatch.setattr(config_mod.settings, "fastembed_cache_path", None)
+
+        server_mod.main()
+
+        expected = explicit or str(tmp_path / "fastembed_cache" / "hf")
+        assert os.environ.get("HF_HOME") == expected
+
+
+class TestExposureWarning:
+    """main() warns when an unauthenticated server listens beyond loopback."""
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        ("host", "oauth", "warned"),
+        [
+            ("0.0.0.0", False, True),
+            ("192.168.1.10", False, True),
+            ("127.0.0.1", False, False),
+            ("localhost", False, False),
+            ("0.0.0.0", True, False),
+        ],
+    )
+    def test_warns_only_when_exposed_without_oauth(
+        self, monkeypatch, caplog, host, oauth, warned
+    ):
+        """Non-loopback bind + OAuth off logs a WARNING naming the risk."""
+        import mcpvectordb.config as config_mod
+        import mcpvectordb.server as server_mod
+
+        monkeypatch.setattr(config_mod.settings, "mcp_transport", "streamable-http")
+        monkeypatch.setattr(config_mod.settings, "mcp_host", host)
+        monkeypatch.setattr(config_mod.settings, "oauth_enabled", oauth)
+        monkeypatch.setattr(config_mod.settings, "oauth_client_id", "cid")
+        monkeypatch.setattr("mcpvectordb.server.get_embedder", MagicMock())
+        monkeypatch.setattr("mcpvectordb.chunker._get_tokenizer", MagicMock())
+        monkeypatch.setattr(server_mod.asyncio, "run", lambda coro: coro.close())
+
+        with caplog.at_level("WARNING", logger="mcpvectordb.server"):
+            server_mod.main()
+
+        exposed = [r for r in caplog.records if "without authentication" in r.message]
+        assert bool(exposed) is warned
+
 
 class TestMainFunction:
     """Tests for the main() entry point function."""
 
     @pytest.mark.unit
+    def test_main_optimizes_store_at_startup(self, monkeypatch, _use_tmp_store):
+        """Startup reclaims versions a previous run left inside the grace window."""
+        import mcpvectordb.config as config_mod
+        import mcpvectordb.server as server_mod
+
+        calls = []
+        monkeypatch.setattr(_use_tmp_store, "optimize", lambda **k: calls.append(k))
+        monkeypatch.setattr(server_mod.mcp, "run", MagicMock())
+        monkeypatch.setattr("mcpvectordb.server.get_embedder", MagicMock())
+        monkeypatch.setattr(config_mod.settings, "mcp_transport", "stdio")
+
+        server_mod.main()
+
+        assert len(calls) == 1
+
+    @pytest.mark.unit
     def test_main_runs_with_stdio_transport(self, monkeypatch):
-        """main() calls mcp.run(transport='stdio') when configured (lines 276-284)."""
+        """main() calls mcp.run(transport='stdio') when configured."""
         import mcpvectordb.config as config_mod
         import mcpvectordb.server as server_mod
 
@@ -928,7 +1054,7 @@ class TestMainFunction:
 
 @pytest.fixture
 def upload_client(monkeypatch):
-    """TestClient with _ingest_content and _convert patched for upload endpoint tests."""
+    """TestClient with _ingest_content and _convert patched for /upload tests."""
     from mcpvectordb import server
     from mcpvectordb.ingestor import IngestResult
 
@@ -970,7 +1096,7 @@ class TestUploadEndpoint:
 
     @pytest.mark.unit
     def test_upload_invalid_metadata_json_returns_400(self, upload_client):
-        """POST with non-JSON metadata field returns 400 with 'metadata' in the error."""
+        """Non-JSON metadata returns 400 with 'metadata' in the error."""
         response = upload_client.post(
             "/upload",
             files={"file": ("test.txt", b"hello", "text/plain")},
@@ -980,8 +1106,21 @@ class TestUploadEndpoint:
         assert "metadata" in response.json()["error"]
 
     @pytest.mark.unit
+    def test_upload_metadata_sent_as_file_returns_400(self, upload_client):
+        """A metadata part sent as a file (not a string) returns 400, not 500."""
+        response = upload_client.post(
+            "/upload",
+            files={
+                "file": ("test.txt", b"hello", "text/plain"),
+                "metadata": ("m.json", b'{"a": 1}', "application/json"),
+            },
+        )
+        assert response.status_code == 400
+        assert "metadata" in response.json()["error"]
+
+    @pytest.mark.unit
     def test_upload_unsupported_format_returns_422(self, monkeypatch, upload_client):
-        """_convert raising UnsupportedFormatError returns 422 with 'Unsupported' in error."""
+        """UnsupportedFormatError from _convert returns 422 ('Unsupported')."""
         from mcpvectordb.exceptions import UnsupportedFormatError
 
         monkeypatch.setattr(
@@ -1025,7 +1164,7 @@ class TestUploadEndpoint:
 
     @pytest.mark.unit
     def test_upload_ingestion_error_returns_500(self, monkeypatch, upload_client):
-        """IngestionError from _ingest_content returns 500 with 'Ingestion failed' in error."""
+        """IngestionError from _ingest_content returns 500 ('Ingestion failed')."""
         from mcpvectordb.exceptions import IngestionError
 
         async def _raise(*args, **kwargs):
@@ -1137,8 +1276,13 @@ class TestIngestFolderTool:
         result = run(server.ingest_folder(folder=str(tmp_path)))
 
         expected_keys = (
-            "total_files", "indexed", "replaced",
-            "skipped", "failed", "results", "errors",
+            "total_files",
+            "indexed",
+            "replaced",
+            "skipped",
+            "failed",
+            "results",
+            "errors",
         )
         for key in expected_keys:
             assert key in result, f"Missing key: {key}"

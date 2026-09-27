@@ -45,10 +45,12 @@ def download_model() -> None:
 
     # Pre-download the HuggingFace tokenizer used by the chunker for token counting.
     # This is required — ingestion will fail if the tokenizer is not cached locally.
-    print("Downloading tokenizer (nomic-ai/nomic-embed-text-v1.5)…")
+    # trust_remote_code=True is required by nomic-ai/nomic-embed-text-v1.5.
+    tokenizer_id = "nomic-ai/nomic-embed-text-v1.5"
+    print(f"Downloading tokenizer ({tokenizer_id})…")
     from transformers import AutoTokenizer
 
-    AutoTokenizer.from_pretrained("nomic-ai/nomic-embed-text-v1.5")
+    AutoTokenizer.from_pretrained(tokenizer_id, trust_remote_code=True)
     print("Tokenizer ready.")
 
 

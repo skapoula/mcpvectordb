@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pytest
@@ -33,7 +33,8 @@ def _make_chunk(
         content_hash=content_hash,
         title="Test Document",
         content=content,
-        embedding=embedding or np.random.rand(settings.embedding_dimension).astype(np.float32).tolist(),
+        embedding=embedding
+        or np.random.rand(settings.embedding_dimension).astype(np.float32).tolist(),
         chunk_index=chunk_index,
         created_at=datetime.now(UTC).isoformat(),
         metadata=json.dumps({}),
@@ -86,7 +87,9 @@ class TestStoreSearch:
     @pytest.mark.integration
     def test_search_empty_table_returns_empty(self, store):
         """Searching an empty table returns [] without raising."""
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         result = store.search(
             embedding=embedding,
             query_text="test query",
@@ -103,7 +106,9 @@ class TestStoreSearch:
         chunks = [_make_chunk(doc_id=doc_id, chunk_index=i) for i in range(10)]
         store.upsert_chunks(chunks)
 
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         result = store.search(
             embedding=embedding,
             query_text="test query",
@@ -126,7 +131,9 @@ class TestStoreSearch:
         ]
         store.upsert_chunks(chunks_a + chunks_b)
 
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         result = store.search(
             embedding=embedding,
             query_text="test query",
@@ -361,7 +368,7 @@ class TestListDocuments:
 
     @pytest.mark.integration
     def test_list_documents_filtered_by_library(self, store):
-        """list_documents with library filter returns only docs from that library (lines 263-264)."""
+        """list_documents with library filter returns only docs from that library."""
         doc_a = str(uuid.uuid4())
         doc_b = str(uuid.uuid4())
         store.upsert_chunks([_make_chunk(doc_id=doc_a, library="lib_x", chunk_index=0)])
@@ -379,7 +386,7 @@ class TestStoreErrors:
 
     @pytest.mark.unit
     def test_open_table_raises_store_error_on_connect_failure(self, monkeypatch):
-        """_open_table raises StoreError when lancedb.connect fails (lines 73-74)."""
+        """_open_table raises StoreError when lancedb.connect fails."""
         from unittest.mock import MagicMock
 
         import lancedb
@@ -396,7 +403,7 @@ class TestStoreErrors:
 
     @pytest.mark.unit
     def test_upsert_chunks_raises_store_error(self, store, monkeypatch):
-        """upsert_chunks raises StoreError when the LanceDB write fails (lines 119-120)."""
+        """upsert_chunks raises StoreError when the LanceDB write fails."""
         from unittest.mock import MagicMock
 
         from mcpvectordb.exceptions import StoreError
@@ -410,7 +417,7 @@ class TestStoreErrors:
 
     @pytest.mark.unit
     def test_find_existing_raises_store_error(self, store, monkeypatch):
-        """find_existing raises StoreError on LanceDB failure (lines 150-151)."""
+        """find_existing raises StoreError on LanceDB failure."""
         from unittest.mock import MagicMock
 
         from mcpvectordb.exceptions import StoreError
@@ -424,7 +431,7 @@ class TestStoreErrors:
 
     @pytest.mark.unit
     def test_delete_document_raises_store_error(self, store, monkeypatch):
-        """delete_document raises StoreError on LanceDB failure (lines 174-175)."""
+        """delete_document raises StoreError on LanceDB failure."""
         from unittest.mock import MagicMock
 
         from mcpvectordb.exceptions import StoreError
@@ -438,7 +445,7 @@ class TestStoreErrors:
 
     @pytest.mark.unit
     def test_search_raises_store_error(self, store, monkeypatch):
-        """search raises StoreError on LanceDB failure (lines 211-212)."""
+        """search raises StoreError on LanceDB failure."""
         from unittest.mock import MagicMock
 
         from mcpvectordb.exceptions import StoreError
@@ -458,7 +465,7 @@ class TestStoreErrors:
 
     @pytest.mark.unit
     def test_get_document_raises_store_error(self, store, monkeypatch):
-        """get_document raises StoreError on LanceDB failure (lines 236-237)."""
+        """get_document raises StoreError on LanceDB failure."""
         from unittest.mock import MagicMock
 
         from mcpvectordb.exceptions import StoreError
@@ -472,7 +479,7 @@ class TestStoreErrors:
 
     @pytest.mark.unit
     def test_list_documents_raises_store_error(self, store, monkeypatch):
-        """list_documents raises StoreError on LanceDB failure (lines 287-288)."""
+        """list_documents raises StoreError on LanceDB failure."""
         from unittest.mock import MagicMock
 
         from mcpvectordb.exceptions import StoreError
@@ -486,7 +493,7 @@ class TestStoreErrors:
 
     @pytest.mark.unit
     def test_list_libraries_raises_store_error(self, store, monkeypatch):
-        """list_libraries raises StoreError on LanceDB failure (lines 326-327)."""
+        """list_libraries raises StoreError on LanceDB failure."""
         from unittest.mock import MagicMock
 
         from mcpvectordb.exceptions import StoreError
@@ -511,10 +518,16 @@ class TestStoreFilter:
             [_make_chunk(doc_id=doc_pdf, file_type="pdf", content="pdf content here")]
         )
         store.upsert_chunks(
-            [_make_chunk(doc_id=doc_html, file_type="html", content="html content here")]
+            [
+                _make_chunk(
+                    doc_id=doc_html, file_type="html", content="html content here"
+                )
+            ]
         )
 
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         results = store.search(
             embedding=embedding,
             query_text="content",
@@ -531,12 +544,18 @@ class TestStoreFilter:
         doc_id = str(uuid.uuid4())
         store.upsert_chunks(
             [
-                _make_chunk(doc_id=doc_id, chunk_index=0, page=1, content="page one text"),
-                _make_chunk(doc_id=doc_id, chunk_index=1, page=2, content="page two text"),
+                _make_chunk(
+                    doc_id=doc_id, chunk_index=0, page=1, content="page one text"
+                ),
+                _make_chunk(
+                    doc_id=doc_id, chunk_index=1, page=2, content="page two text"
+                ),
             ]
         )
 
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         results = store.search(
             embedding=embedding,
             query_text="page",
@@ -559,7 +578,9 @@ class TestStoreFilter:
             [_make_chunk(doc_id=doc_b, library="lib_a", file_type="html")]
         )
 
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         results = store.search(
             embedding=embedding,
             query_text="test",
@@ -577,7 +598,9 @@ class TestStoreFilter:
         monkeypatch.setattr(
             store, "_table", lambda: None
         )  # table not needed — error is raised before use
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         with pytest.raises(StoreError):
             store.search(
                 embedding=embedding,
@@ -687,8 +710,121 @@ class TestStoreSchemaMigration:
         _open_table(str(lancedb_dir), "docs")
 
 
+def _hybrid_hits(store, term):
+    """Return contents matched by a hybrid search for *term* (fallback forbidden)."""
+    q = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+    return [
+        r.content
+        for r in store.search(
+            embedding=q, query_text=term, top_k=50, library=None, filter=None
+        )
+    ]
+
+
+class TestStoreFtsIndex:
+    """The FTS index is built once and stays correct across writes and deletes."""
+
+    @pytest.fixture
+    def fts_calls(self, store, monkeypatch):
+        """Count create_fts_index calls on the table class."""
+        store.upsert_chunks([_make_chunk(content="seed row")])
+        table_cls = type(store._table())
+        original = table_cls.create_fts_index
+        calls = []
+
+        def _spy(self, *args, **kwargs):
+            calls.append(args)
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(table_cls, "create_fts_index", _spy)
+        monkeypatch.setattr(
+            store, "_vector_search", lambda *a, **k: pytest.fail("fallback used")
+        )
+        return calls
+
+    @pytest.mark.integration
+    def test_no_rebuild_on_later_writes(self, store, fts_calls):
+        """Upserts and deletes after the first write do not rebuild the index."""
+        for i in range(3):
+            store.upsert_chunks([_make_chunk(content=f"later row {i}")])
+        store.delete_document(store._table().search().limit(1).to_list()[0]["doc_id"])
+        assert fts_calls == []
+
+    @pytest.mark.integration
+    def test_rows_added_after_index_are_found(self, store, fts_calls):
+        """Rows written after the index was built are matched by BM25."""
+        store.upsert_chunks([_make_chunk(content="late arrival zyxwvut")])
+        assert any("zyxwvut" in c for c in _hybrid_hits(store, "zyxwvut"))
+
+    @pytest.mark.integration
+    def test_deleted_rows_are_not_found(self, store, fts_calls):
+        """A deleted document no longer appears in BM25 results."""
+        doc_id = str(uuid.uuid4())
+        store.upsert_chunks([_make_chunk(doc_id=doc_id, content="doomed qwertyuio")])
+        store.delete_document(doc_id)
+        assert not any("qwertyuio" in c for c in _hybrid_hits(store, "qwertyuio"))
+
+
+class TestStoreOptimize:
+    """Compaction keeps the version history bounded without losing data."""
+
+    @pytest.mark.integration
+    def test_optimize_bounds_versions_and_keeps_search(self, store, monkeypatch):
+        """optimize() drops old versions; FTS and vector search still work."""
+        for i in range(10):
+            store.upsert_chunks([_make_chunk(content=f"row {i} term{i}xq")])
+        assert len(store._table().list_versions()) > 3
+
+        store.optimize(cleanup_older_than=timedelta(0))
+
+        assert len(store._table().list_versions()) <= 3
+        assert store._table().count_rows() == 10
+        monkeypatch.setattr(
+            store, "_vector_search", lambda *a, **k: pytest.fail("fallback used")
+        )
+        assert any("term9xq" in c for c in _hybrid_hits(store, "term9xq"))
+
+    @pytest.mark.integration
+    def test_upsert_optimizes_every_n_writes(self, store, monkeypatch):
+        """upsert_chunks triggers optimize() once per _OPTIMIZE_EVERY writes."""
+        import mcpvectordb.store as store_module
+
+        monkeypatch.setattr(store_module, "_OPTIMIZE_EVERY", 3)
+        calls = []
+        monkeypatch.setattr(store, "optimize", lambda **k: calls.append(k))
+        for i in range(7):
+            store.upsert_chunks([_make_chunk(content=f"row {i}")])
+        assert len(calls) == 2
+
+
 class TestStoreHybridSearch:
     """Hybrid search (BM25 + vector) tests."""
+
+    @pytest.mark.integration
+    def test_hybrid_ranks_exact_term_without_vector_fallback(self, store, monkeypatch):
+        """BM25 surfaces an exact-term row that vector similarity alone ranks last."""
+        dim = settings.embedding_dimension
+        query_vec = np.ones(dim, dtype=np.float32)
+        store.upsert_chunks(
+            [
+                _make_chunk(content=f"generic filler text {i}", embedding=[1.0] * dim)
+                for i in range(10)
+            ]
+            + [_make_chunk(content="error code E4021 in prod", embedding=[-1.0] * dim)]
+        )
+
+        def _no_fallback(*args, **kwargs):
+            raise AssertionError("hybrid search fell back to vector-only")
+
+        monkeypatch.setattr(store, "_vector_search", _no_fallback)
+        results = store.search(
+            embedding=query_vec.tolist(),
+            query_text="E4021",
+            top_k=3,
+            library=None,
+            filter=None,
+        )
+        assert any("E4021" in r.content for r in results)
 
     @pytest.mark.integration
     def test_hybrid_finds_exact_term(self, store):
@@ -697,7 +833,9 @@ class TestStoreHybridSearch:
         store.upsert_chunks(
             [_make_chunk(doc_id=doc_id, content="deployment error code E-4021 in prod")]
         )
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         results = store.search(
             embedding=embedding,
             query_text="E-4021",
@@ -710,7 +848,9 @@ class TestStoreHybridSearch:
     @pytest.mark.integration
     def test_hybrid_empty_table_returns_empty(self, store):
         """Hybrid search on empty table returns [] without raising."""
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         results = store.search(
             embedding=embedding,
             query_text="anything",
@@ -730,7 +870,9 @@ class TestStoreHybridSearch:
         store.upsert_chunks(
             [_make_chunk(doc_id=doc_b, library="lib_b", content="alpha omega delta")]
         )
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         results = store.search(
             embedding=embedding,
             query_text="alpha omega",
@@ -748,7 +890,9 @@ class TestStoreHybridSearch:
         monkeypatch.setattr(store_module.settings, "hybrid_search_enabled", False)
         doc_id = str(uuid.uuid4())
         store.upsert_chunks([_make_chunk(doc_id=doc_id)])
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         results = store.search(
             embedding=embedding,
             query_text="test",
@@ -761,7 +905,6 @@ class TestStoreHybridSearch:
     @pytest.mark.unit
     def test_refine_factor_applied(self, store, monkeypatch):
         """search() calls refine_factor() with the configured value on both paths."""
-        from unittest.mock import MagicMock, patch
 
         import mcpvectordb.store as store_module
 
@@ -792,7 +935,9 @@ class TestStoreHybridSearch:
 
         monkeypatch.setattr(store_module.settings, "hybrid_search_enabled", False)
         monkeypatch.setattr(store, "_table", patched_table)
-        embedding = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        embedding = (
+            np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+        )
         store.search(
             embedding=embedding,
             query_text="test",

@@ -2,10 +2,12 @@
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from markitdown import MarkItDown
+from mcpvectordb.exceptions import IngestionError, UnsupportedFormatError
 
-from mcpvectordb.exceptions import UnsupportedFormatError
+if TYPE_CHECKING:
+    from markitdown import MarkItDown
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +40,17 @@ SUPPORTED_EXTENSIONS = {
     ".zip",
 }
 
-_md = MarkItDown()
+_md: "MarkItDown | None" = None
+
+
+def _get_markitdown() -> "MarkItDown":
+    """Return the MarkItDown singleton, initialising on first call."""
+    global _md  # noqa: PLW0603
+    if _md is None:
+        from markitdown import MarkItDown
+
+        _md = MarkItDown()
+    return _md
 
 
 def convert(source: Path) -> str:
@@ -48,13 +60,20 @@ def convert(source: Path) -> str:
         source: Path to the local file to convert.
 
     Returns:
-        Markdown text extracted from the file.
+        Markdown text extracted from the file, or an empty string if the
+        file contains no extractable text content.
 
     Raises:
-        UnsupportedFormatError: If the file extension is not supported.
+        UnsupportedFormatError: If the file has no extension or an unsupported one.
         IngestionError: If MarkItDown fails to convert the file.
     """
+    source = source.resolve()
     ext = source.suffix.lower()
+
+    if ext == "":
+        raise UnsupportedFormatError(
+            f"No file extension detected for {source.name!r} — cannot determine format."
+        )
     if ext not in SUPPORTED_EXTENSIONS:
         raise UnsupportedFormatError(
             f"Unsupported file extension: {ext!r}. "
@@ -62,7 +81,14 @@ def convert(source: Path) -> str:
         )
 
     logger.debug("Converting %s (ext=%s)", source, ext)
-    result = _md.convert(str(source))
-    text = result.text_content or ""
-    logger.debug("Converted %s → %d chars", source, len(text))
+    try:
+        result = _get_markitdown().convert(str(source))
+        text = result.text_content or ""
+    except Exception as exc:
+        raise IngestionError(f"Failed to convert {source.name!r}: {exc}") from exc
+
+    if not text:
+        logger.warning("Converted %s produced empty text content", source)
+    else:
+        logger.debug("Converted %s → %d chars", source, len(text))
     return text

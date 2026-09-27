@@ -15,3 +15,7 @@ class StoreError(Exception):
 
 class EmbeddingError(Exception):
     """Raised when the embedding model fails to produce vectors."""
+
+
+class ConfigurationError(Exception):
+    """Raised at startup when required settings are missing or inconsistent."""

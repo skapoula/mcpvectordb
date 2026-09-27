@@ -53,6 +53,12 @@ def sample_pdf() -> Path:
 
 
 @pytest.fixture
+def sample_pdf_2pages() -> Path:
+    """Hand-built two-page PDF; each page has distinct text."""
+    return SAMPLE_DOCS / "sample_2pages.pdf"
+
+
+@pytest.fixture
 def sample_docx() -> Path:
     """Tiny real DOCX fixture."""
     return SAMPLE_DOCS / "sample.docx"

@@ -98,7 +98,7 @@ class TestIngestFile:
     def test_ingest_file_sets_file_type_and_last_modified(
         self, tmp_path, store, mock_embedder, _patch_chunker, _patch_converter
     ):
-        """Chunks store the correct file_type, a non-empty last_modified, and page=0."""
+        """Chunks store file_type, a non-empty last_modified, and page 1 (1 page)."""
         f = tmp_path / "report.pdf"
         f.write_bytes(b"%PDF-1.4 minimal")
 
@@ -107,7 +107,7 @@ class TestIngestFile:
 
         assert all(c.file_type == "pdf" for c in chunks)
         assert all(c.last_modified != "" for c in chunks)
-        assert all(c.page == 0 for c in chunks)
+        assert all(c.page == 1 for c in chunks)
 
     @pytest.mark.integration
     def test_ingest_file_type_matches_extension(
@@ -233,6 +233,139 @@ class TestIngestURL:
         assert all(c.last_modified == "Wed, 01 Jan 2025 00:00:00 GMT" for c in chunks)
 
 
+@pytest.fixture
+def _resolve(monkeypatch):
+    """Fake DNS: map hostnames to fixed IPs for the private-address guard."""
+    import socket
+
+    table: dict[str, str] = {}
+
+    def _fake(host, *args, **kwargs):
+        if host not in table:
+            raise socket.gaierror(f"unknown host {host}")
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (table[host], 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", _fake)
+    return table
+
+
+@pytest.fixture
+def _network_transport(monkeypatch):
+    """Run as a network-exposed server (the guard is off for stdio)."""
+    from mcpvectordb.config import settings
+
+    monkeypatch.setattr(settings, "mcp_transport", "streamable-http")
+    monkeypatch.setattr(settings, "allow_private_urls", False)
+
+
+_HTML = b"<html><body><h1>Title</h1><p>Content.</p></body></html>"
+
+
+class TestIngestPdfPages:
+    """PDF chunks carry the 1-indexed page they came from."""
+
+    @pytest.mark.integration
+    def test_pdf_chunks_record_page_numbers(
+        self, store, mock_embedder, _patch_chunker, sample_pdf_2pages
+    ):
+        """Each page is chunked separately; chunk_index stays document-wide."""
+        result = run(ingest(sample_pdf_2pages, "default", None, store))
+        records = store.get_document(result.doc_id)
+        assert [r.page for r in records] == [1, 1, 1, 2, 2, 2]
+        assert [r.chunk_index for r in records] == list(range(6))
+
+    @pytest.mark.integration
+    def test_text_without_page_breaks_has_page_zero(
+        self, tmp_path, store, mock_embedder, _patch_chunker, _patch_converter
+    ):
+        """Formats without page breaks keep page=0 (not applicable)."""
+        f = tmp_path / "doc.docx"
+        f.write_bytes(b"fake")
+        result = run(ingest(f, "default", None, store))
+        assert {r.page for r in store.get_document(result.doc_id)} == {0}
+
+
+class TestIngestURLPrivateAddressGuard:
+    """ingest_url must not fetch internal addresses on network transports."""
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("ip", ["10.0.0.5", "127.0.0.1", "169.254.169.254"])
+    def test_private_address_blocked(
+        self, store, mock_embedder, _resolve, _network_transport, ip
+    ):
+        """URLs resolving to private/loopback/link-local IPs raise IngestionError."""
+        _resolve["internal.corp"] = ip
+        with pytest.raises(IngestionError, match="non-public address"):
+            run(ingest("http://internal.corp/", "web", None, store))
+
+    @pytest.mark.integration
+    def test_public_address_allowed(
+        self,
+        store,
+        mock_embedder,
+        _patch_chunker,
+        _resolve,
+        _network_transport,
+        httpx_mock,
+    ):
+        """A public address is fetched normally."""
+        _resolve["example.com"] = "93.184.216.34"
+        httpx_mock.add_response(url="https://example.com/doc", content=_HTML)
+        assert run(ingest("https://example.com/doc", "web", None, store)).status == (
+            "indexed"
+        )
+
+    @pytest.mark.integration
+    def test_redirect_to_private_address_blocked(
+        self, store, mock_embedder, _resolve, _network_transport, httpx_mock
+    ):
+        """A public URL redirecting to an internal host is blocked at the hop."""
+        _resolve["example.com"] = "93.184.216.34"
+        _resolve["internal.corp"] = "10.1.2.3"
+        httpx_mock.add_response(
+            url="https://example.com/r",
+            status_code=302,
+            headers={"Location": "http://internal.corp/secret"},
+        )
+        with pytest.raises(IngestionError, match="non-public address"):
+            run(ingest("https://example.com/r", "web", None, store))
+
+    @pytest.mark.integration
+    def test_stdio_allows_private_address(
+        self, store, mock_embedder, _patch_chunker, _resolve, httpx_mock, monkeypatch
+    ):
+        """Local stdio use may ingest intranet pages."""
+        from mcpvectordb.config import settings
+
+        monkeypatch.setattr(settings, "mcp_transport", "stdio")
+        _resolve["intranet"] = "10.0.0.7"
+        httpx_mock.add_response(url="http://intranet/page", content=_HTML)
+        assert run(ingest("http://intranet/page", "web", None, store)).status == (
+            "indexed"
+        )
+
+    @pytest.mark.integration
+    def test_opt_out_allows_private_address(
+        self,
+        store,
+        mock_embedder,
+        _patch_chunker,
+        _resolve,
+        _network_transport,
+        httpx_mock,
+        monkeypatch,
+    ):
+        """ALLOW_PRIVATE_URLS=true disables the guard."""
+        from mcpvectordb.config import settings
+
+        monkeypatch.setattr(settings, "allow_private_urls", True)
+        _resolve["intranet"] = "10.0.0.7"
+        httpx_mock.add_response(url="http://intranet/page", content=_HTML)
+        assert run(ingest("http://intranet/page", "web", None, store)).status == (
+            "indexed"
+        )
+
+
 class TestIngestDedup:
     """Deduplication scenarios — all three cases."""
 
@@ -312,7 +445,7 @@ class TestIngestFileErrorPaths:
     def test_conversion_general_error_becomes_ingestion_error(
         self, tmp_path, store, mock_embedder, monkeypatch
     ):
-        """A RuntimeError from convert() is wrapped in IngestionError (lines 108-109)."""
+        """A RuntimeError from convert() is wrapped in IngestionError."""
         f = tmp_path / "doc.pdf"
         f.write_bytes(b"%PDF content")
 
@@ -328,7 +461,7 @@ class TestIngestFileErrorPaths:
     def test_chunker_error_becomes_ingestion_error(
         self, tmp_path, store, mock_embedder, _patch_converter, monkeypatch
     ):
-        """A RuntimeError from chunk() is wrapped in IngestionError (lines 116-117)."""
+        """A RuntimeError from chunk() is wrapped in IngestionError."""
         f = tmp_path / "doc.pdf"
         f.write_bytes(b"%PDF content")
 
@@ -344,7 +477,7 @@ class TestIngestFileErrorPaths:
     def test_empty_chunks_raises_ingestion_error(
         self, tmp_path, store, mock_embedder, _patch_converter, monkeypatch
     ):
-        """Empty chunk list raises IngestionError (line 120)."""
+        """Empty chunk list raises IngestionError."""
         f = tmp_path / "doc.pdf"
         f.write_bytes(b"%PDF content")
 
@@ -357,7 +490,7 @@ class TestIngestFileErrorPaths:
     def test_embedding_error_becomes_ingestion_error(
         self, tmp_path, store, _patch_converter, _patch_chunker, monkeypatch
     ):
-        """An exception from embed_documents() is wrapped in IngestionError (lines 125-126)."""
+        """An exception from embed_documents() is wrapped in IngestionError."""
         from unittest.mock import MagicMock
 
         f = tmp_path / "doc.pdf"
@@ -374,7 +507,7 @@ class TestIngestFileErrorPaths:
     def test_store_write_error_becomes_ingestion_error(
         self, tmp_path, _patch_converter, _patch_chunker, monkeypatch
     ):
-        """A RuntimeError from store.upsert_chunks() is wrapped in IngestionError (lines 151-152)."""
+        """A RuntimeError from store.upsert_chunks() is wrapped in IngestionError."""
         from unittest.mock import MagicMock
 
         f = tmp_path / "doc.pdf"
@@ -405,7 +538,7 @@ class TestIngestHelpers:
 
     @pytest.mark.unit
     def test_extract_title_falls_back_to_source_filename(self):
-        """_extract_title returns the last path component when no heading is found (line 250)."""
+        """_extract_title returns the last path component when no heading is found."""
         from mcpvectordb.ingestor import _extract_title
 
         result = _extract_title(
@@ -418,7 +551,7 @@ class TestIngestHelpers:
     def test_convert_html_bytes_raises_ingestion_error_on_markitdown_failure(
         self, monkeypatch
     ):
-        """IngestionError is raised when MarkItDown fails in _convert_html_bytes (lines 231-232)."""
+        """IngestionError is raised when MarkItDown fails in _convert_html_bytes."""
         from unittest.mock import MagicMock
 
         import markitdown
@@ -433,7 +566,11 @@ class TestIngestHelpers:
         )
 
         with pytest.raises(IngestionError, match="HTML conversion failed"):
-            run(_convert_html_bytes(b"<html><body>test</body></html>", "https://example.com"))
+            run(
+                _convert_html_bytes(
+                    b"<html><body>test</body></html>", "https://example.com"
+                )
+            )
 
 
 class TestIngestFolder:
@@ -450,13 +587,36 @@ class TestIngestFolder:
 
         # max_concurrency=1 avoids LanceDB concurrent-write race during table init
         result = await ingest_folder(
-            folder=tmp_path, library="default", metadata=None, store=store,
+            folder=tmp_path,
+            library="default",
+            metadata=None,
+            store=store,
             max_concurrency=1,
         )
 
         assert result.total_files == 3
         assert result.indexed == 3
         assert result.failed == 0
+
+    @pytest.mark.integration
+    async def test_ingest_folder_optimizes_store_once(
+        self, tmp_path, store, mock_embedder, _patch_chunker, _patch_converter
+    ):
+        """A bulk ingest ends with one compaction of the store."""
+        (tmp_path / "a.pdf").write_bytes(b"%PDF minimal")
+        (tmp_path / "b.pdf").write_bytes(b"%PDF minimal2")
+        calls = []
+        store.optimize = lambda **k: calls.append(k)
+
+        await ingest_folder(
+            folder=tmp_path,
+            library="default",
+            metadata=None,
+            store=store,
+            max_concurrency=1,
+        )
+
+        assert len(calls) == 1
 
     @pytest.mark.integration
     async def test_ingest_folder_skips_unsupported_extensions(
@@ -516,7 +676,7 @@ class TestIngestFolder:
     async def test_ingest_folder_one_failure_does_not_stop_batch(
         self, tmp_path, store, monkeypatch
     ):
-        """Monkeypatch ingest to raise on one path; assert failed=1 and others indexed."""
+        """One file raising yields failed=1 while the others are indexed."""
         (tmp_path / "good.pdf").write_bytes(b"%PDF good")
         (tmp_path / "bad.pdf").write_bytes(b"%PDF bad")
         (tmp_path / "also_good.txt").write_text("text content")
@@ -561,9 +721,7 @@ class TestIngestFolder:
         f.write_bytes(b"%PDF content")
 
         with pytest.raises(IngestionError):
-            await ingest_folder(
-                folder=f, library="default", metadata=None, store=store
-            )
+            await ingest_folder(folder=f, library="default", metadata=None, store=store)
 
     @pytest.mark.integration
     async def test_ingest_folder_returns_bulk_ingest_result(
