@@ -710,6 +710,61 @@ class TestStoreSchemaMigration:
         _open_table(str(lancedb_dir), "docs")
 
 
+def _hybrid_hits(store, term):
+    """Return contents matched by a hybrid search for *term* (fallback forbidden)."""
+    q = np.random.rand(settings.embedding_dimension).astype(np.float32).tolist()
+    return [
+        r.content
+        for r in store.search(
+            embedding=q, query_text=term, top_k=50, library=None, filter=None
+        )
+    ]
+
+
+class TestStoreFtsIndex:
+    """The FTS index is built once and stays correct across writes and deletes."""
+
+    @pytest.fixture
+    def fts_calls(self, store, monkeypatch):
+        """Count create_fts_index calls on the table class."""
+        store.upsert_chunks([_make_chunk(content="seed row")])
+        table_cls = type(store._table())
+        original = table_cls.create_fts_index
+        calls = []
+
+        def _spy(self, *args, **kwargs):
+            calls.append(args)
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(table_cls, "create_fts_index", _spy)
+        monkeypatch.setattr(
+            store, "_vector_search", lambda *a, **k: pytest.fail("fallback used")
+        )
+        return calls
+
+    @pytest.mark.integration
+    def test_no_rebuild_on_later_writes(self, store, fts_calls):
+        """Upserts and deletes after the first write do not rebuild the index."""
+        for i in range(3):
+            store.upsert_chunks([_make_chunk(content=f"later row {i}")])
+        store.delete_document(store._table().search().limit(1).to_list()[0]["doc_id"])
+        assert fts_calls == []
+
+    @pytest.mark.integration
+    def test_rows_added_after_index_are_found(self, store, fts_calls):
+        """Rows written after the index was built are matched by BM25."""
+        store.upsert_chunks([_make_chunk(content="late arrival zyxwvut")])
+        assert any("zyxwvut" in c for c in _hybrid_hits(store, "zyxwvut"))
+
+    @pytest.mark.integration
+    def test_deleted_rows_are_not_found(self, store, fts_calls):
+        """A deleted document no longer appears in BM25 results."""
+        doc_id = str(uuid.uuid4())
+        store.upsert_chunks([_make_chunk(doc_id=doc_id, content="doomed qwertyuio")])
+        store.delete_document(doc_id)
+        assert not any("qwertyuio" in c for c in _hybrid_hits(store, "qwertyuio"))
+
+
 class TestStoreHybridSearch:
     """Hybrid search (BM25 + vector) tests."""
 

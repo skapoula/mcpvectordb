@@ -122,6 +122,25 @@ def _ensure_scalar_indexes(table: lancedb.table.Table) -> None:
             )
 
 
+def _ensure_fts_index(table: lancedb.table.Table) -> None:
+    """Create the BM25 index on 'content' if it does not exist yet.
+
+    Built once: the native index also matches rows written after it was built
+    and drops deleted rows, so rebuilding on every write is unnecessary.
+    Compaction (Store.optimize) folds new rows into the index.
+
+    Args:
+        table: Open LanceDB table with at least one row.
+    """
+    if any(ix.index_type == "FTS" for ix in table.list_indices()):
+        return
+    try:
+        table.create_fts_index("content")
+        logger.debug("FTS index created on 'content'")
+    except Exception as e:
+        logger.warning("FTS index creation failed (hybrid search degraded): %s", e)
+
+
 def _validate_embedding_dimension(table: lancedb.table.Table) -> None:
     """Raise StoreError if the table's embedding column dimension doesn't match settings.
 
@@ -228,6 +247,7 @@ class Store:
         self._uri = uri or settings.lancedb_uri
         self._table_name = table_name or settings.lancedb_table_name
         self._indexes_created = False
+        self._fts_ready = False
 
     def _table(self) -> lancedb.table.Table:
         """Open and return the LanceDB table, creating scalar indexes on first call."""
@@ -259,13 +279,9 @@ class Store:
                 row["embedding"] = np.array(row["embedding"], dtype=np.float32)
             table.add(rows)
             logger.info("Upserted %d chunks (doc_id=%s)", len(chunks), chunks[0].doc_id)
-            try:
-                table.create_fts_index("content", replace=True)
-                logger.debug("FTS index rebuilt on 'content'")
-            except Exception as fts_err:
-                logger.warning(
-                    "FTS index rebuild failed (hybrid search degraded): %s", fts_err
-                )
+            if not self._fts_ready:
+                _ensure_fts_index(table)
+                self._fts_ready = True
         except Exception as e:
             raise StoreError(f"Failed to upsert {len(chunks)} chunks") from e
 
@@ -323,15 +339,6 @@ class Store:
             after = table.count_rows()
             deleted = before - after
             logger.info("Deleted %d chunks for doc_id=%s", deleted, doc_id)
-            # Rebuild FTS index so deleted chunks no longer appear in BM25 results.
-            try:
-                table.create_fts_index("content", replace=True)
-                logger.debug("FTS index rebuilt after delete of doc_id=%s", doc_id)
-            except Exception as fts_err:
-                logger.warning(
-                    "FTS index rebuild failed after delete (hybrid search may return stale results): %s",
-                    fts_err,
-                )
             return deleted
         except Exception as e:
             raise StoreError(f"Failed to delete document {doc_id!r}") from e
