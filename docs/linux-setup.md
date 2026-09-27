@@ -89,6 +89,10 @@ The server only accepts requests whose `Host` header is `localhost` or listed in
 missing when you run the script, re-run it with
 `ALLOWED_HOSTS=<your-tailscale-hostname>`.
 
+On this network transport `ingest_url` refuses URLs whose host resolves to a
+private, loopback or link-local address, so a remote client cannot make the server
+fetch internal pages. Set `ALLOW_PRIVATE_URLS=true` in `.env` to allow intranet URLs.
+
 ### Managing the service
 
 ```bash

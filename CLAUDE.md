@@ -267,6 +267,7 @@ CHUNK_MIN_TOKENS=50
 # ── URL fetching ───────────────────────────────────────────────────────────────
 HTTP_TIMEOUT_SECONDS=10
 HTTP_USER_AGENT=mcpvectordb/1.0
+ALLOW_PRIVATE_URLS=false           # network transports: ingest_url refuses private/loopback/link-local hosts
 
 # ── TLS (streamable-http only) ─────────────────────────────────────────────────
 TLS_ENABLED=false

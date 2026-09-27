@@ -2,8 +2,10 @@
 
 import asyncio
 import hashlib
+import ipaddress
 import json
 import logging
+import socket
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -453,6 +455,37 @@ async def ingest_content(
     )
 
 
+def _check_public_host(url: str) -> None:
+    """Raise IngestionError if *url*'s host resolves to a non-public address.
+
+    Args:
+        url: Absolute http(s) URL about to be requested.
+
+    Raises:
+        IngestionError: If the host cannot be resolved or any of its addresses
+            is private, loopback, link-local, or otherwise not globally routable.
+    """
+    host = httpx.URL(url).host
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError as e:
+        raise IngestionError(f"Cannot resolve host {host!r}") from e
+    for info in infos:
+        ip = ipaddress.ip_address(str(info[4][0]).split("%")[0])
+        if not ip.is_global:
+            raise IngestionError(
+                f"Refusing to fetch {url!r}: {host!r} resolves to non-public address "
+                f"{ip}. Set ALLOW_PRIVATE_URLS=true to allow internal URLs."
+            )
+
+
+async def _guard_request(request: httpx.Request) -> None:
+    """httpx request hook: apply the public-address check to every hop."""
+    # ponytail: check-then-connect leaves a DNS-rebinding window; pin the
+    # resolved IP in a custom transport if that threat matters.
+    await asyncio.to_thread(_check_public_host, str(request.url))
+
+
 async def _fetch_url(url: str) -> tuple[bytes, str]:
     """Fetch a URL and return its raw bytes and last-modified timestamp.
 
@@ -465,11 +498,13 @@ async def _fetch_url(url: str) -> tuple[bytes, str]:
     Raises:
         IngestionError: On network error or non-2xx status.
     """
+    guarded = settings.mcp_transport != "stdio" and not settings.allow_private_urls
     try:
         async with httpx.AsyncClient(
             timeout=settings.http_timeout_seconds,
             headers={"User-Agent": settings.http_user_agent},
             follow_redirects=True,
+            event_hooks={"request": [_guard_request]} if guarded else {},
         ) as client:
             response = await client.get(url)
             response.raise_for_status()

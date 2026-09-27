@@ -720,11 +720,12 @@ class TestRequireGoogleAuth:
     @pytest.mark.unit
     def test_returns_401_for_unauthenticated_request(self):
         """Unauthenticated request to a non-well-known path gets 401."""
-        from mcpvectordb.server import _RequireGoogleAuth
         from starlette.applications import Starlette
         from starlette.requests import Request as StarletteRequest
         from starlette.responses import PlainTextResponse
         from starlette.routing import Route
+
+        from mcpvectordb.server import _RequireGoogleAuth
 
         def homepage(request: StarletteRequest):
             return PlainTextResponse("ok")
@@ -738,11 +739,12 @@ class TestRequireGoogleAuth:
     @pytest.mark.unit
     def test_well_known_passes_without_auth(self):
         """/.well-known/* requests bypass the auth check."""
-        from mcpvectordb.server import _RequireGoogleAuth
         from starlette.applications import Starlette
         from starlette.requests import Request as StarletteRequest
         from starlette.responses import PlainTextResponse
         from starlette.routing import Route
+
+        from mcpvectordb.server import _RequireGoogleAuth
 
         def well_known(request: StarletteRequest):
             return PlainTextResponse("metadata")
@@ -760,13 +762,14 @@ class TestRequireGoogleAuth:
         """Requests with is_authenticated=True on user are forwarded."""
         from typing import Any as TypingAny
 
-        from mcpvectordb.server import _RequireGoogleAuth
         from starlette.applications import Starlette
         from starlette.authentication import SimpleUser
         from starlette.requests import Request as StarletteRequest
         from starlette.responses import PlainTextResponse
         from starlette.routing import Route
         from starlette.types import Receive, Scope, Send
+
+        from mcpvectordb.server import _RequireGoogleAuth
 
         class _AuthenticatedUser(SimpleUser):
             is_authenticated = True
@@ -961,6 +964,42 @@ class TestFrozenBundleContext:
 
         expected = explicit or str(tmp_path / "fastembed_cache" / "hf")
         assert os.environ.get("HF_HOME") == expected
+
+
+class TestExposureWarning:
+    """main() warns when an unauthenticated server listens beyond loopback."""
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        ("host", "oauth", "warned"),
+        [
+            ("0.0.0.0", False, True),
+            ("192.168.1.10", False, True),
+            ("127.0.0.1", False, False),
+            ("localhost", False, False),
+            ("0.0.0.0", True, False),
+        ],
+    )
+    def test_warns_only_when_exposed_without_oauth(
+        self, monkeypatch, caplog, host, oauth, warned
+    ):
+        """Non-loopback bind + OAuth off logs a WARNING naming the risk."""
+        import mcpvectordb.config as config_mod
+        import mcpvectordb.server as server_mod
+
+        monkeypatch.setattr(config_mod.settings, "mcp_transport", "streamable-http")
+        monkeypatch.setattr(config_mod.settings, "mcp_host", host)
+        monkeypatch.setattr(config_mod.settings, "oauth_enabled", oauth)
+        monkeypatch.setattr(config_mod.settings, "oauth_client_id", "cid")
+        monkeypatch.setattr("mcpvectordb.server.get_embedder", MagicMock())
+        monkeypatch.setattr("mcpvectordb.chunker._get_tokenizer", MagicMock())
+        monkeypatch.setattr(server_mod.asyncio, "run", lambda coro: coro.close())
+
+        with caplog.at_level("WARNING", logger="mcpvectordb.server"):
+            server_mod.main()
+
+        exposed = [r for r in caplog.records if "without authentication" in r.message]
+        assert bool(exposed) is warned
 
 
 class TestMainFunction:

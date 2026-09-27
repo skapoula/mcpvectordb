@@ -1,6 +1,7 @@
 """MCP server entry point — registers tools and selects transport."""
 
 import asyncio
+import ipaddress
 import json
 import logging
 import sys
@@ -695,6 +696,30 @@ def _validate_oauth_config() -> None:
         )
 
 
+def _warn_if_exposed() -> None:
+    """Log a WARNING when a network transport listens beyond loopback without OAuth.
+
+    Anyone who can reach the port can then call every tool, including
+    delete_document. Containers legitimately bind 0.0.0.0 behind a
+    127.0.0.1-published port, so this warns instead of refusing to start.
+    """
+    if settings.mcp_transport == "stdio" or settings.oauth_enabled:
+        return
+    host = settings.mcp_host
+    try:
+        loopback = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = host == "localhost"
+    if not loopback:
+        logger.warning(
+            "Listening on %s:%s without authentication: anyone who can reach this "
+            "port can read, add and delete documents. Bind 127.0.0.1, publish the "
+            "port only on loopback, or set OAUTH_ENABLED=true.",
+            host,
+            settings.mcp_port,
+        )
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 def main() -> None:
     """Start the MCP server with the configured transport."""
@@ -721,6 +746,7 @@ def main() -> None:
 
     _validate_tls_config()
     _validate_oauth_config()
+    _warn_if_exposed()
     logger.info("mcpvectordb starting (transport=%s)", settings.mcp_transport)
 
     # Ensure runtime data directories exist before any I/O.

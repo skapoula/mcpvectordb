@@ -105,6 +105,9 @@ class Settings(BaseSettings):
         return [e.strip() for e in self.oauth_allowed_emails.split(",") if e.strip()]
 
     # URL fetching
+    # On network transports ingest_url refuses hosts that resolve to private,
+    # loopback, link-local or reserved addresses (SSRF). stdio is exempt.
+    allow_private_urls: bool = False
     http_timeout_seconds: float = 10.0
     http_user_agent: str = "mcpvectordb/1.0"
 

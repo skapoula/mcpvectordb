@@ -233,6 +233,115 @@ class TestIngestURL:
         assert all(c.last_modified == "Wed, 01 Jan 2025 00:00:00 GMT" for c in chunks)
 
 
+@pytest.fixture
+def _resolve(monkeypatch):
+    """Fake DNS: map hostnames to fixed IPs for the private-address guard."""
+    import socket
+
+    table: dict[str, str] = {}
+
+    def _fake(host, *args, **kwargs):
+        if host not in table:
+            raise socket.gaierror(f"unknown host {host}")
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (table[host], 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", _fake)
+    return table
+
+
+@pytest.fixture
+def _network_transport(monkeypatch):
+    """Run as a network-exposed server (the guard is off for stdio)."""
+    from mcpvectordb.config import settings
+
+    monkeypatch.setattr(settings, "mcp_transport", "streamable-http")
+    monkeypatch.setattr(settings, "allow_private_urls", False)
+
+
+_HTML = b"<html><body><h1>Title</h1><p>Content.</p></body></html>"
+
+
+class TestIngestURLPrivateAddressGuard:
+    """ingest_url must not fetch internal addresses on network transports."""
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("ip", ["10.0.0.5", "127.0.0.1", "169.254.169.254"])
+    def test_private_address_blocked(
+        self, store, mock_embedder, _resolve, _network_transport, ip
+    ):
+        """URLs resolving to private/loopback/link-local IPs raise IngestionError."""
+        _resolve["internal.corp"] = ip
+        with pytest.raises(IngestionError, match="non-public address"):
+            run(ingest("http://internal.corp/", "web", None, store))
+
+    @pytest.mark.integration
+    def test_public_address_allowed(
+        self,
+        store,
+        mock_embedder,
+        _patch_chunker,
+        _resolve,
+        _network_transport,
+        httpx_mock,
+    ):
+        """A public address is fetched normally."""
+        _resolve["example.com"] = "93.184.216.34"
+        httpx_mock.add_response(url="https://example.com/doc", content=_HTML)
+        assert run(ingest("https://example.com/doc", "web", None, store)).status == (
+            "indexed"
+        )
+
+    @pytest.mark.integration
+    def test_redirect_to_private_address_blocked(
+        self, store, mock_embedder, _resolve, _network_transport, httpx_mock
+    ):
+        """A public URL redirecting to an internal host is blocked at the hop."""
+        _resolve["example.com"] = "93.184.216.34"
+        _resolve["internal.corp"] = "10.1.2.3"
+        httpx_mock.add_response(
+            url="https://example.com/r",
+            status_code=302,
+            headers={"Location": "http://internal.corp/secret"},
+        )
+        with pytest.raises(IngestionError, match="non-public address"):
+            run(ingest("https://example.com/r", "web", None, store))
+
+    @pytest.mark.integration
+    def test_stdio_allows_private_address(
+        self, store, mock_embedder, _patch_chunker, _resolve, httpx_mock, monkeypatch
+    ):
+        """Local stdio use may ingest intranet pages."""
+        from mcpvectordb.config import settings
+
+        monkeypatch.setattr(settings, "mcp_transport", "stdio")
+        _resolve["intranet"] = "10.0.0.7"
+        httpx_mock.add_response(url="http://intranet/page", content=_HTML)
+        assert run(ingest("http://intranet/page", "web", None, store)).status == (
+            "indexed"
+        )
+
+    @pytest.mark.integration
+    def test_opt_out_allows_private_address(
+        self,
+        store,
+        mock_embedder,
+        _patch_chunker,
+        _resolve,
+        _network_transport,
+        httpx_mock,
+        monkeypatch,
+    ):
+        """ALLOW_PRIVATE_URLS=true disables the guard."""
+        from mcpvectordb.config import settings
+
+        monkeypatch.setattr(settings, "allow_private_urls", True)
+        _resolve["intranet"] = "10.0.0.7"
+        httpx_mock.add_response(url="http://intranet/page", content=_HTML)
+        assert run(ingest("http://intranet/page", "web", None, store)).status == (
+            "indexed"
+        )
+
+
 class TestIngestDedup:
     """Deduplication scenarios — all three cases."""
 
