@@ -59,6 +59,8 @@ Write-Step "Downloading embedding model to build_models/…"
 Write-Host "    (nomic-embed-text-v1.5, ~500 MB — skip with Ctrl+C if already done)"
 
 $env:FASTEMBED_CACHE_PATH = $BuildModels
+# Tokenizer cache, bundled with the model; the frozen server sets HF_HOME to it.
+$env:HF_HOME = Join-Path $BuildModels "hf"
 uv run mcpvectordb-download-model
 if ($LASTEXITCODE -ne 0) { Write-Fail "Model download failed" }
 Write-OK "Model ready in $BuildModels"

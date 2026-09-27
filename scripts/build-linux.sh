@@ -15,8 +15,11 @@ step "Installing dependencies (uv sync --all-groups)..."
 uv sync --all-groups || fail "uv sync failed"
 ok "Dependencies installed"
 
-step "Downloading embedding model to build_models/..."
-FASTEMBED_CACHE_PATH="$PROJECT_DIR/build_models" uv run mcpvectordb-download-model \
+# Model and tokenizer both go into build_models/, which the spec bundles. The frozen
+# server points FASTEMBED_CACHE_PATH and HF_HOME back at them (server.py main()).
+step "Downloading embedding model and tokenizer to build_models/..."
+FASTEMBED_CACHE_PATH="$PROJECT_DIR/build_models" HF_HOME="$PROJECT_DIR/build_models/hf" \
+    uv run mcpvectordb-download-model \
     || fail "Model download failed"
 ok "Model ready in build_models/"
 

@@ -892,6 +892,66 @@ class TestFrozenBundleContext:
 
         assert os.environ.get("FASTEMBED_CACHE_PATH") == explicit
 
+    @pytest.mark.unit
+    def test_frozen_bundle_not_overridden_by_default_cache(
+        self, tmp_path, monkeypatch
+    ):
+        """The settings default cache path must not replace the bundled model cache."""
+        import os
+
+        import mcpvectordb.config as config_mod
+        import mcpvectordb.server as server_mod
+
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+        monkeypatch.delenv("FASTEMBED_CACHE_PATH", raising=False)
+        monkeypatch.setattr(config_mod.settings, "mcp_transport", "stdio")
+        monkeypatch.setattr(server_mod.mcp, "run", MagicMock())
+        monkeypatch.setattr("mcpvectordb.server.get_embedder", MagicMock())
+        monkeypatch.setattr(
+            config_mod.settings, "lancedb_uri", str(tmp_path / "lancedb")
+        )
+        # Non-None, as Settings' default_factory always produces in real runs.
+        monkeypatch.setattr(
+            config_mod.settings, "fastembed_cache_path", str(tmp_path / "user_models")
+        )
+
+        server_mod.main()
+
+        expected = str(tmp_path / "fastembed_cache")
+        assert os.environ.get("FASTEMBED_CACHE_PATH") == expected
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("explicit", [None, "/custom/hf"])
+    def test_frozen_sets_hf_home_to_bundled_tokenizer(
+        self, tmp_path, monkeypatch, explicit
+    ):
+        """Frozen main() points HF_HOME at the bundled tokenizer unless already set."""
+        import os
+
+        import mcpvectordb.config as config_mod
+        import mcpvectordb.server as server_mod
+
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+        monkeypatch.delenv("FASTEMBED_CACHE_PATH", raising=False)
+        if explicit:
+            monkeypatch.setenv("HF_HOME", explicit)
+        else:
+            monkeypatch.delenv("HF_HOME", raising=False)
+        monkeypatch.setattr(config_mod.settings, "mcp_transport", "stdio")
+        monkeypatch.setattr(server_mod.mcp, "run", MagicMock())
+        monkeypatch.setattr("mcpvectordb.server.get_embedder", MagicMock())
+        monkeypatch.setattr(
+            config_mod.settings, "lancedb_uri", str(tmp_path / "lancedb")
+        )
+        monkeypatch.setattr(config_mod.settings, "fastembed_cache_path", None)
+
+        server_mod.main()
+
+        expected = explicit or str(tmp_path / "fastembed_cache" / "hf")
+        assert os.environ.get("HF_HOME") == expected
+
 
 class TestMainFunction:
     """Tests for the main() entry point function."""

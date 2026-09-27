@@ -703,9 +703,12 @@ def main() -> None:
     # PyInstaller frozen bundle: use bundled model cache unless user overrides.
     # sys.frozen is set by PyInstaller's bootloader; sys._MEIPASS is the
     # temp directory where the bundle is extracted at runtime.
-    if getattr(sys, "frozen", False) and not os.environ.get("FASTEMBED_CACHE_PATH"):
-        _bundle = Path(getattr(sys, "_MEIPASS", ""))
-        os.environ["FASTEMBED_CACHE_PATH"] = str(_bundle / "fastembed_cache")
+    if getattr(sys, "frozen", False):
+        _bundle = Path(getattr(sys, "_MEIPASS", "")) / "fastembed_cache"
+        os.environ.setdefault("FASTEMBED_CACHE_PATH", str(_bundle))
+        # Tokenizer cache staged by the build script (HF_HOME=build_models/hf).
+        # Must be set before huggingface_hub is first imported.
+        os.environ.setdefault("HF_HOME", str(_bundle / "hf"))
 
     # Disable HuggingFace tokenizer parallelism before any model code is imported.
     # The Rust rayon thread pool inside `tokenizers` can deadlock when used inside
@@ -729,7 +732,8 @@ def main() -> None:
     if settings.fastembed_cache_path:
         cache_path = Path(settings.fastembed_cache_path).expanduser()
         cache_path.mkdir(parents=True, exist_ok=True)
-        os.environ["FASTEMBED_CACHE_PATH"] = str(cache_path)
+        # setdefault: keep the frozen-bundle cache set above.
+        os.environ.setdefault("FASTEMBED_CACHE_PATH", str(cache_path))
 
     # Pre-warm both models at startup so the first ingest call is not delayed.
     # Loading is done here (blocking, before the event loop starts) to avoid
