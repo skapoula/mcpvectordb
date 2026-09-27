@@ -61,13 +61,10 @@ docker compose -f deploy/local/docker-compose.yml ps
 
 # Follow startup logs (Ctrl+C to stop)
 docker compose -f deploy/local/docker-compose.yml logs -f
-
-# Confirm the server responds
-curl http://localhost:8000/
 ```
 
-Expected: HTTP 200 with a short JSON response. The embedding model loads on first use,
-so the initial search or ingest will take a few extra seconds.
+Expected: the `STATUS` column shows `healthy` once the embedding model and tokenizer
+have loaded (up to 30 seconds after start).
 
 ## Step 4: Configure Claude Desktop
 
