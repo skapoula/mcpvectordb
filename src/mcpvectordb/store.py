@@ -333,6 +333,7 @@ class Store:
             safe_library = library.replace("'", "''")
             results = (
                 table.search()
+                .select(["doc_id", "content_hash"])
                 .where(f"source = '{safe_source}' AND library = '{safe_library}'")
                 .limit(1)
                 .to_list()
@@ -506,7 +507,19 @@ class Store:
         """
         try:
             table = self._table()
-            q = table.search()
+            # Never fetch embeddings or chunk text here: reading every column of
+            # every row made this ~100x slower (2.7 s vs 22 ms at 6k rows).
+            q = table.search().select(
+                [
+                    "doc_id",
+                    "source",
+                    "title",
+                    "library",
+                    "content_hash",
+                    "created_at",
+                    "metadata",
+                ]
+            )
             if library is not None:
                 safe_lib = library.replace("'", "''")
                 q = q.where(f"library = '{safe_lib}'")
@@ -550,7 +563,7 @@ class Store:
             table = self._table()
             # LanceDB has no server-side GROUP BY; all rows are fetched and
             # aggregated in Python.
-            rows = table.search().to_list()
+            rows = table.search().select(["library", "doc_id"]).to_list()
 
             libs: dict[str, dict] = {}
             for row in rows:
