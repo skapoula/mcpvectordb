@@ -11,6 +11,7 @@ dist/
 build/
 target/
 out/
+obj/
 .git/
 __pycache__/
 *.png
