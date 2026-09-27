@@ -56,6 +56,27 @@ def _token_length(text: str) -> int:
     return len(tok.encode(text, add_special_tokens=False))
 
 
+def _token_offsets(text: str) -> list[tuple[int, int]]:
+    """Return (start, end) character offsets of each token in *text*.
+
+    Slicing the original text by these offsets keeps case, punctuation and
+    spacing intact, which tokenizer.decode() does not (uncased tokenizers
+    lowercase and re-space it).
+    """
+    enc = _get_tokenizer()(text, add_special_tokens=False, return_offsets_mapping=True)
+    return list(enc["offset_mapping"])
+
+
+def _tail(text: str, n_tokens: int) -> str:
+    """Return roughly the last *n_tokens* tokens of *text*, starting on a word."""
+    offsets = _token_offsets(text)
+    if len(offsets) <= n_tokens:
+        return text
+    tail = text[offsets[-n_tokens][0] :]
+    space = tail.find(" ")
+    return tail[space + 1 :] if 0 <= space < len(tail) - 1 else tail
+
+
 def _merge_splits(
     splits: list[str], separator: str, chunk_size: int, overlap: int
 ) -> list[str]:
@@ -86,6 +107,13 @@ def _merge_splits(
                 if current:
                     # The separator that preceded this element is also gone
                     current_len -= sep_len
+            # A single split longer than the overlap budget trims to nothing;
+            # seed the next chunk with the previous chunk's tail instead.
+            if not current and overlap > 0:
+                tail = _tail(chunks[-1], overlap)
+                tail_len = _token_length(tail)
+                if tail_len + sep_len + split_len <= chunk_size:
+                    current, lengths, current_len = [tail], [tail_len], tail_len
             # Recalculate sep_addition after overlap trimming
             sep_addition = sep_len if current else 0
         current.append(split)
@@ -108,7 +136,7 @@ def _split_recursive(
     actually used at each recursion level.
 
     For the character-level fallback (empty separator), the text is encoded once
-    and decoded as token windows to avoid O(n) per-character tokenizer calls.
+    and sliced by token offsets to avoid O(n) per-character tokenizer calls.
     """
     if not separators:
         # No more separators — return text as-is (may be oversized, caller filters)
@@ -117,16 +145,15 @@ def _split_recursive(
     sep = separators[0]
     remaining = separators[1:]
 
-    # Character-level last resort: encode once and decode sliding windows.
+    # Character-level last resort: tokenize once and slice token windows.
     if sep == "":
-        tok = _get_tokenizer()
-        token_ids = tok.encode(text, add_special_tokens=False)
-        if len(token_ids) <= chunk_size:
+        offsets = _token_offsets(text)
+        if len(offsets) <= chunk_size:
             return [text]
         step = max(1, chunk_size - overlap)
         return [
-            tok.decode(token_ids[i : i + chunk_size])
-            for i in range(0, len(token_ids), step)
+            text[offsets[i][0] : offsets[min(i + chunk_size, len(offsets)) - 1][1]]
+            for i in range(0, len(offsets), step)
         ]
 
     splits = text.split(sep)

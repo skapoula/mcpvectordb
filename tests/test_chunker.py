@@ -111,3 +111,33 @@ class TestChunkInternals:
 
         result = _split_recursive("some text that cannot be split further", [], 512, 64)
         assert result == ["some text that cannot be split further"]
+
+
+class TestChunkTextFidelity:
+    """Chunks are exact slices of the input and neighbours overlap."""
+
+    @pytest.mark.unit
+    def test_unsplittable_text_is_sliced_not_decoded(self):
+        """Text with no separators keeps its case and punctuation exactly."""
+        from mcpvectordb.chunker import chunk
+
+        text = "ErrorCode-E4021/NodePort.Kubernetes_" * 300  # no spaces or newlines
+        result = chunk(text)
+        assert len(result) > 1
+        assert all(c in text for c in result)
+        assert text.startswith(result[0])
+        assert text.endswith(result[-1])
+
+    @pytest.mark.unit
+    def test_neighbouring_chunks_overlap_for_long_paragraphs(self):
+        """Paragraphs longer than the overlap budget still yield overlapping chunks."""
+        from mcpvectordb.chunker import chunk
+
+        paras = [
+            f"Paragraph {i}. " + " ".join(f"word{i}x{j}" for j in range(60))
+            for i in range(30)
+        ]
+        result = chunk("\n\n".join(paras))
+        assert len(result) > 2
+        for prev, nxt in zip(result, result[1:], strict=False):
+            assert nxt[:40] in prev
