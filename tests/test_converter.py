@@ -22,6 +22,13 @@ class TestPDFConverter:
         result = convert(sample_pdf)
         assert isinstance(result, str)
 
+    @pytest.mark.integration
+    def test_keeps_page_breaks(self, sample_pdf_2pages):
+        """PDF text keeps form-feed page breaks so pages can be numbered."""
+        pages = convert(sample_pdf_2pages).split("\x0c")
+        assert "alpha quantum" in pages[0]
+        assert "beta lattice" in pages[1]
+
 
 class TestDocxConverter:
     """Tests for DOCX → Markdown conversion."""

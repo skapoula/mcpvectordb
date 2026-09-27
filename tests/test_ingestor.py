@@ -98,7 +98,7 @@ class TestIngestFile:
     def test_ingest_file_sets_file_type_and_last_modified(
         self, tmp_path, store, mock_embedder, _patch_chunker, _patch_converter
     ):
-        """Chunks store the correct file_type, a non-empty last_modified, and page=0."""
+        """Chunks store file_type, a non-empty last_modified, and page 1 (1 page)."""
         f = tmp_path / "report.pdf"
         f.write_bytes(b"%PDF-1.4 minimal")
 
@@ -107,7 +107,7 @@ class TestIngestFile:
 
         assert all(c.file_type == "pdf" for c in chunks)
         assert all(c.last_modified != "" for c in chunks)
-        assert all(c.page == 0 for c in chunks)
+        assert all(c.page == 1 for c in chunks)
 
     @pytest.mark.integration
     def test_ingest_file_type_matches_extension(
@@ -259,6 +259,30 @@ def _network_transport(monkeypatch):
 
 
 _HTML = b"<html><body><h1>Title</h1><p>Content.</p></body></html>"
+
+
+class TestIngestPdfPages:
+    """PDF chunks carry the 1-indexed page they came from."""
+
+    @pytest.mark.integration
+    def test_pdf_chunks_record_page_numbers(
+        self, store, mock_embedder, _patch_chunker, sample_pdf_2pages
+    ):
+        """Each page is chunked separately; chunk_index stays document-wide."""
+        result = run(ingest(sample_pdf_2pages, "default", None, store))
+        records = store.get_document(result.doc_id)
+        assert [r.page for r in records] == [1, 1, 1, 2, 2, 2]
+        assert [r.chunk_index for r in records] == list(range(6))
+
+    @pytest.mark.integration
+    def test_text_without_page_breaks_has_page_zero(
+        self, tmp_path, store, mock_embedder, _patch_chunker, _patch_converter
+    ):
+        """Formats without page breaks keep page=0 (not applicable)."""
+        f = tmp_path / "doc.docx"
+        f.write_bytes(b"fake")
+        result = run(ingest(f, "default", None, store))
+        assert {r.page for r in store.get_document(result.doc_id)} == {0}
 
 
 class TestIngestURLPrivateAddressGuard:

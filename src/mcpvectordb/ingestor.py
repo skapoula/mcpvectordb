@@ -309,10 +309,22 @@ async def _index_text(
     last_modified: str,
     store: Store,
 ) -> IngestResult:
-    """Chunk, embed and store *text*, then delete the version it replaces."""
+    """Chunk, embed and store *text*, then delete the version it replaces.
+
+    PDF text carries form-feed page breaks; each page is chunked on its own so
+    every chunk records its 1-indexed page. Other text is page 0 (unknown).
+    """
     title = _extract_title(text, source_str)
+    parts = text.split("\x0c")
+    paged = len(parts) > 1 or file_type == "pdf"
+    pages = list(enumerate(parts, start=1)) if paged else [(0, text)]
+    chunks: list[str] = []
+    chunk_pages: list[int] = []
     try:
-        chunks = await asyncio.to_thread(chunk, text)
+        for page_no, page_text in pages:
+            page_chunks = await asyncio.to_thread(chunk, page_text)
+            chunks += page_chunks
+            chunk_pages += [page_no] * len(page_chunks)
     except Exception as e:
         raise IngestionError(f"Chunking failed for {source_str!r}") from e
     if not chunks:
@@ -341,7 +353,7 @@ async def _index_text(
             metadata=meta_json,
             file_type=file_type,
             last_modified=last_modified,
-            page=0,
+            page=chunk_pages[i],
         )
         for i, chunk_text in enumerate(chunks)
     ]
