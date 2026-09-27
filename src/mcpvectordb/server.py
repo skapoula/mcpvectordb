@@ -764,6 +764,9 @@ def main() -> None:
         # setdefault: keep the frozen-bundle cache set above.
         os.environ.setdefault("FASTEMBED_CACHE_PATH", str(cache_path))
 
+    # Reclaim versions a previous run left inside Store.optimize's grace window.
+    _store.optimize()
+
     # Pre-warm both models at startup so the first ingest call is not delayed.
     # Loading is done here (blocking, before the event loop starts) to avoid
     # any interaction with asyncio.to_thread().

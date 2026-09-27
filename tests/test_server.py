@@ -1006,6 +1006,22 @@ class TestMainFunction:
     """Tests for the main() entry point function."""
 
     @pytest.mark.unit
+    def test_main_optimizes_store_at_startup(self, monkeypatch, _use_tmp_store):
+        """Startup reclaims versions a previous run left inside the grace window."""
+        import mcpvectordb.config as config_mod
+        import mcpvectordb.server as server_mod
+
+        calls = []
+        monkeypatch.setattr(_use_tmp_store, "optimize", lambda **k: calls.append(k))
+        monkeypatch.setattr(server_mod.mcp, "run", MagicMock())
+        monkeypatch.setattr("mcpvectordb.server.get_embedder", MagicMock())
+        monkeypatch.setattr(config_mod.settings, "mcp_transport", "stdio")
+
+        server_mod.main()
+
+        assert len(calls) == 1
+
+    @pytest.mark.unit
     def test_main_runs_with_stdio_transport(self, monkeypatch):
         """main() calls mcp.run(transport='stdio') when configured."""
         import mcpvectordb.config as config_mod
