@@ -404,6 +404,31 @@ class TestIngestDedup:
     """Deduplication scenarios — all three cases."""
 
     @pytest.mark.integration
+    def test_ingest_waits_for_lock_held_by_another_process(
+        self, store, mock_embedder, _patch_chunker
+    ):
+        """A second process ingesting the same source blocks this one until done."""
+        from filelock import FileLock
+
+        from mcpvectordb.ingestor import ingest_content
+
+        def _ingest():
+            return ingest_content("v1", "notes.md", "default", None, store)
+
+        async def _attempt():
+            return await asyncio.wait_for(_ingest(), timeout=0.5)
+
+        # A separate FileLock instance takes its own OS lock, as a CLI run would.
+        other = FileLock(store.source_lock_path("notes.md", "default"))
+        other.acquire()
+        try:
+            with pytest.raises(TimeoutError):
+                run(_attempt())
+        finally:
+            other.release()
+        assert run(_attempt()).status == "indexed"
+
+    @pytest.mark.integration
     def test_concurrent_ingests_of_one_source_leave_one_document(
         self, store, mock_embedder, _patch_chunker
     ):

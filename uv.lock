@@ -986,6 +986,8 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastembed" },
+    { name = "filelock" },
+    { name = "httpcore" },
     { name = "httpx" },
     { name = "lancedb" },
     { name = "markitdown", extra = ["all"] },
@@ -1014,6 +1016,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastembed" },
+    { name = "filelock", specifier = ">=3.24.3" },
+    { name = "httpcore", specifier = ">=1.0.9" },
     { name = "httpx" },
     { name = "lancedb" },
     { name = "markitdown", extras = ["all"] },

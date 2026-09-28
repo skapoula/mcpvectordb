@@ -1,5 +1,6 @@
 """LanceDB read/write operations and ChunkRecord schema."""
 
+import hashlib
 import json
 import logging
 import re
@@ -264,6 +265,22 @@ class Store:
             _ensure_scalar_indexes(table)
             self._indexes_created = True
         return table
+
+    def source_lock_path(self, source: str, library: str) -> Path | None:
+        """Return the lock file guarding ingests of one (source, library).
+
+        Every process sharing this database locks the same file, so a CLI run
+        and a server cannot both replace one document. Returns None for s3://
+        URIs, which have no shared local directory to lock in.
+        """
+        if self._uri.startswith("s3://"):
+            return None
+        key = hashlib.sha256(f"{library}\0{source}".encode()).hexdigest()[:32]
+        lock_dir = Path(self._uri).expanduser() / ".ingest-locks"
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        # ponytail: one empty file per source ever ingested, never pruned —
+        # unlinking a lock file races with waiters on it.
+        return lock_dir / f"{key}.lock"
 
     def upsert_chunks(self, chunks: list[ChunkRecord]) -> None:
         """Write a list of chunk records to the store.

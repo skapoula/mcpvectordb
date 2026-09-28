@@ -14,6 +14,7 @@ from pathlib import Path
 
 import httpcore
 import httpx
+from filelock import FileLock, Timeout
 from pydantic import BaseModel
 
 from mcpvectordb.chunker import chunk
@@ -191,7 +192,7 @@ async def ingest(
         except OSError:
             last_modified = ""
 
-    async with _source_lock(source_str, library):
+    async with _source_lock(store, source_str, library):
         # ── 2. Dedup check (before the expensive conversion) ───────────────────────
         new_hash = hashlib.sha256(raw_bytes).hexdigest()
         skipped, existing_doc_id = await _dedup(store, source_str, library, new_hash)
@@ -256,7 +257,7 @@ async def ingest_content(
         IngestionError: If chunking, embedding, or storing fails.
     """
     source_str = source.strip() or "uploaded-content"
-    async with _source_lock(source_str, library):
+    async with _source_lock(store, source_str, library):
         new_hash = hashlib.sha256(content.encode()).hexdigest()
         skipped, existing_doc_id = await _dedup(store, source_str, library, new_hash)
         if skipped:
@@ -282,21 +283,43 @@ async def ingest_content(
         )
 
 
+_LOCK_POLL_SECONDS = 0.05
+
 # (source, library) -> (lock, number of callers holding or awaiting it)
 _source_locks: dict[tuple[str, str], tuple[asyncio.Lock, int]] = {}
 
 
 @asynccontextmanager
-async def _source_lock(source_str: str, library: str) -> AsyncIterator[None]:
-    """Serialise ingests of one (source, library) so dedup-then-replace is atomic."""
-    # ponytail: in-process only; a second server or a concurrent
-    # mcpvectordb-ingest CLI run can still race. Needs a store-level lock then.
+async def _source_lock(
+    store: Store, source_str: str, library: str
+) -> AsyncIterator[None]:
+    """Serialise ingests of one (source, library) so dedup-then-replace is atomic.
+
+    An asyncio lock orders tasks in this process; a lock file next to the
+    database orders processes (a second server, a mcpvectordb-ingest run).
+    """
     key = (source_str, library)
     lock, users = _source_locks.get(key, (asyncio.Lock(), 0))
     _source_locks[key] = (lock, users + 1)
     try:
         async with lock:
-            yield
+            path = store.source_lock_path(source_str, library)
+            if path is None:  # s3:// — no shared directory to lock in
+                yield
+                return
+            file_lock = FileLock(path)
+            # Poll rather than block a worker thread: a cancelled wait then
+            # never leaves an orphaned thread that later takes the lock.
+            while True:
+                try:
+                    file_lock.acquire(blocking=False)
+                    break
+                except Timeout:
+                    await asyncio.sleep(_LOCK_POLL_SECONDS)
+            try:
+                yield
+            finally:
+                file_lock.release()
     finally:
         lock, users = _source_locks[key]
         if users == 1:
