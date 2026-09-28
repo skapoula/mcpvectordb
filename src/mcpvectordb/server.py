@@ -13,7 +13,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.types import Receive, Scope, Send
+from starlette.types import Message, Receive, Scope, Send
 
 from mcpvectordb.chunker import join_chunks
 from mcpvectordb.config import settings
@@ -480,6 +480,10 @@ async def server_info(check_path: str | None = None) -> dict:
 
 
 # ── HTTP upload endpoint ───────────────────────────────────────────────────────
+class _UploadTooLargeError(Exception):
+    """Raised mid-stream when an upload body passes MAX_UPLOAD_BYTES."""
+
+
 @mcp.custom_route("/upload", methods=["POST"])
 async def upload_handler(request: Request) -> JSONResponse:
     """Accept multipart file upload and run the full ingest pipeline on the server.
@@ -489,26 +493,27 @@ async def upload_handler(request: Request) -> JSONResponse:
         library  — library name (optional, defaults to DEFAULT_LIBRARY)
         metadata — JSON string of key-value pairs (optional)
     """
-    # max_part_size below only bounds non-file fields; file parts spool to disk
-    # unchecked, so bound the whole body by its declared length first. The
-    # HTTP server stops reading at Content-Length, so the header cannot lie.
+    # max_part_size only bounds non-file fields; file parts spool to disk
+    # unchecked. Count body bytes as they arrive and stop at the limit, so
+    # neither a missing nor an understated Content-Length gets past it.
+    limit = settings.max_upload_bytes
+    received = 0
+
+    async def _capped_receive() -> Message:
+        nonlocal received
+        message = await request.receive()
+        received += len(message.get("body", b""))
+        if received > limit:
+            raise _UploadTooLargeError
+        return message
+
     try:
-        length = int(request.headers["content-length"])
-    except (KeyError, ValueError):
+        form = await Request(request.scope, _capped_receive).form(max_part_size=limit)
+    except _UploadTooLargeError:
         return JSONResponse(
-            {"status": "error", "error": "Content-Length header required"},
-            status_code=411,
-        )
-    if length > settings.max_upload_bytes:
-        return JSONResponse(
-            {
-                "status": "error",
-                "error": f"Upload exceeds {settings.max_upload_bytes} bytes",
-            },
+            {"status": "error", "error": f"Upload exceeds {limit} bytes"},
             status_code=413,
         )
-    try:
-        form = await request.form(max_part_size=settings.max_upload_bytes)
     except Exception as e:
         return JSONResponse(
             {"status": "error", "error": f"Form parse failed: {e}"}, status_code=400

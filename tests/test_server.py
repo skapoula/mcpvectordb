@@ -1108,6 +1108,12 @@ class TestMainFunction:
         mock_run.assert_called_once_with(transport="sse")
 
 
+def _multipart(data: bytes) -> bytes:
+    """Encode *data* as the 'file' part of a multipart body with boundary 'b'."""
+    head = b'--b\r\nContent-Disposition: form-data; name="file"; filename="a.txt"'
+    return head + b"\r\n\r\n" + data + b"\r\n--b--\r\n"
+
+
 @pytest.fixture
 def upload_client(monkeypatch):
     """TestClient with _ingest_content and _convert patched for /upload tests."""
@@ -1154,16 +1160,48 @@ class TestUploadEndpoint:
         assert response.status_code == 413
 
     @pytest.mark.unit
-    def test_upload_without_content_length_returns_411(self, upload_client):
-        """A chunked body has no declared size to check, so it is refused."""
-        body = b'--b\r\nContent-Disposition: form-data; name="file"; '
-        body += b'filename="a.txt"\r\n\r\nhi\r\n--b--\r\n'
+    @pytest.mark.parametrize(("size", "status"), [(100, 200), (4096, 413)])
+    def test_upload_chunked_body_is_capped(
+        self, monkeypatch, upload_client, size, status
+    ):
+        """A chunked body has no declared size; its bytes are counted instead."""
+        monkeypatch.setattr(settings, "max_upload_bytes", 1024)
         response = upload_client.post(
             "/upload",
-            content=iter([body]),
+            content=iter([_multipart(b"x" * size)]),
             headers={"Content-Type": "multipart/form-data; boundary=b"},
         )
-        assert response.status_code == 411
+        assert response.status_code == status
+
+    @pytest.mark.unit
+    def test_upload_cap_ignores_understated_content_length(
+        self, monkeypatch, upload_client
+    ):
+        """A Content-Length smaller than the body does not get past the limit."""
+        from starlette.requests import Request
+
+        from mcpvectordb import server
+
+        monkeypatch.setattr(settings, "max_upload_bytes", 1024)
+        body = _multipart(b"x" * 4096)
+        pieces = [body[i : i + 512] for i in range(0, len(body), 512)]
+
+        async def receive():
+            chunk = pieces.pop(0)
+            return {"type": "http.request", "body": chunk, "more_body": bool(pieces)}
+
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/upload",
+            "query_string": b"",
+            "headers": [
+                (b"content-type", b"multipart/form-data; boundary=b"),
+                (b"content-length", b"1"),
+            ],
+        }
+        response = run(server.upload_handler(Request(scope, receive)))
+        assert response.status_code == 413
 
     @pytest.mark.unit
     def test_upload_missing_file_field_returns_400(self, upload_client):
