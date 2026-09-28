@@ -31,7 +31,7 @@ No root is needed for any option.
    ```
 
    It installs dependencies (`uv sync`), creates `~/.mcpvectordb/`, pre-downloads the
-   embedding model, writes `.env`, and prints the client config.
+   embedding model and tokenizer (~600 MB), writes `.env`, and prints the client config.
 
 2. Paste the printed JSON into `~/.config/Claude/claude_desktop_config.json`, or run the
    printed `claude mcp add` command for Claude Code.
@@ -115,6 +115,39 @@ The script removes the service and asks before it deletes `~/.mcpvectordb/`.
 
 ---
 
+## Add Your Documents
+
+The library starts empty. Give the **full path**; the server reads files from this
+machine (for Option C, the machine running the service), so nothing is attached to the
+chat.
+
+**Ask the assistant** (all options):
+
+> "Add `/home/you/Documents/contract.pdf` to my library."
+>
+> "Add every document in `/home/you/Documents/Reports` to a library called reports."
+>
+> "Add https://example.com/guide to a library called research."
+
+Folders include subfolders. The reply says how many files were added, skipped or failed.
+
+**Bulk-load from a terminal** (Options A and C; the Option B binary contains the server
+only). From the project directory:
+
+```bash
+uv run mcpvectordb-ingest ~/Documents/Reports --library reports
+```
+
+It uses the same database as the server, and the server sees the new documents
+straight away. Adding the same file again skips it if unchanged and replaces it if it
+changed.
+
+Supported formats are PDF (with a text layer), `.docx`, `.pptx`, `.xlsx`/`.xls`,
+HTML, `.txt`, `.md`, `.csv`, `.json`, `.xml` and `.zip`; images, audio, `.doc` and
+`.ppt` are refused. See [Supported file types](../README.md#supported-file-types).
+
+---
+
 ## Data Directory Layout
 
 ```
@@ -131,6 +164,8 @@ The script removes the service and asks before it deletes `~/.mcpvectordb/`.
 
 | Symptom                                     | Fix                                                                                |
 | ------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `Permission denied` running a script        | Run it through bash: `bash scripts/setup-linux.sh` (a ZIP download may drop the executable bit) |
+| `Cannot ingest 'x.jpg'` (or `.doc`, `.mp3`) | Format not supported; the message says what to do (run OCR, save as `.docx`/`.pptx`, transcribe locally) |
 | `No systemd user session`                   | Log in directly (desktop or `ssh`), not through `su` or `sudo`, then re-run        |
 | Service stops when you log out              | Run `sudo loginctl enable-linger $USER`                                            |
 | ChatGPT gets HTTP 421 `Invalid Host header` | Re-run setup with `ALLOWED_HOSTS=<your-tailscale-hostname>`                        |

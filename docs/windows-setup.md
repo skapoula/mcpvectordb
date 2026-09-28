@@ -33,12 +33,14 @@ Two deployment options: **Python + uv** (developer-friendly) or **standalone `.e
 
 2. Run the bootstrapper:
    ```powershell
-   .\scripts\setup-windows.ps1
+   powershell -ExecutionPolicy Bypass -File .\scripts\setup-windows.ps1
    ```
+   Windows blocks downloaded scripts by default; `-ExecutionPolicy Bypass` allows this
+   one run without changing your system setting.
    The script:
-   - Checks uv and Python 3.11+
+   - Checks uv and installs Python 3.13 through uv if needed
    - Runs `uv sync` to install all Python dependencies
-   - **Pre-downloads the embedding model** (~500 MB ONNX) to `AppData\Local\mcpvectordb\models`
+   - **Pre-downloads the embedding model** (~600 MB with tokenizer) to `AppData\Local\mcpvectordb\models`
    - Creates LanceDB data directory
    - Generates `.env` with Windows-appropriate paths
    - Prints the Claude Desktop config block
@@ -53,7 +55,7 @@ Two deployment options: **Python + uv** (developer-friendly) or **standalone `.e
 ### Embedding model — pre-downloaded, not on first run
 
 The setup script runs `uv run mcpvectordb-download-model` which downloads
-`nomic-embed-text-v1.5` (~500 MB) into `AppData\Local\mcpvectordb\models`.
+`nomic-embed-text-v1.5` and its tokenizer (~600 MB) into `AppData\Local\mcpvectordb\models`.
 The server starts instantly on every subsequent launch — no first-run download.
 
 To re-download manually:
@@ -73,13 +75,13 @@ installation required.
 
 1. Install build prerequisites on the **build machine** (one-time):
    ```powershell
-   # uv, Python 3.11 — same as Option A
-   .\scripts\setup-windows.ps1
+   # uv and Python 3.13 — same as Option A
+   powershell -ExecutionPolicy Bypass -File .\scripts\setup-windows.ps1
    ```
 
 2. Build the `.exe`:
    ```powershell
-   .\scripts\build-windows.ps1
+   powershell -ExecutionPolicy Bypass -File .\scripts\build-windows.ps1
    ```
    The script downloads the embedding model (if not already in `build_models\`),
    then runs PyInstaller. Output: `dist\mcpvectordb.exe` (~800 MB–1 GB).
@@ -109,7 +111,7 @@ installation required.
 - Complete mcpvectordb MCP server
 - LanceDB vector store with full-text search (tantivy)
 - nomic-embed-text-v1.5 ONNX embedding model — **no download on first run**
-- MarkItDown converters (PDF, Word, PowerPoint, Excel, HTML, and more)
+- MarkItDown converters for the [supported file types](../README.md#supported-file-types)
 - All Python runtime dependencies
 
 ---
@@ -123,6 +125,35 @@ After restarting Claude Desktop, open a new conversation and check that the
 
 Claude should respond with an empty libraries list (no error). That confirms the
 server started and connected successfully.
+
+---
+
+## Add Your Documents
+
+The library starts empty. Give the **full path**; the server reads files from this PC,
+so nothing is attached to the chat.
+
+**Ask Claude** (both options):
+
+> "Add `C:\Users\you\Documents\contract.pdf` to my library."
+>
+> "Add every document in `C:\Users\you\Documents\Reports` to a library called reports."
+>
+> "Add https://example.com/guide to a library called research."
+
+Folders include subfolders. Claude reports how many files were added, skipped or failed.
+
+**Bulk-load from PowerShell** (Option A only; the `.exe` contains the server only). From
+the project directory:
+
+```powershell
+uv run mcpvectordb-ingest "C:\Users\you\Documents\Reports" --library reports
+```
+
+Adding the same file again skips it if unchanged and replaces it if it changed.
+Supported formats are PDF (with a text layer), `.docx`, `.pptx`, `.xlsx`/`.xls`,
+HTML, `.txt`, `.md`, `.csv`, `.json`, `.xml` and `.zip`; images, audio, `.doc` and
+`.ppt` are refused. See [Supported file types](../README.md#supported-file-types).
 
 ---
 
@@ -143,7 +174,7 @@ C:\Users\<you>\
     └── server.log                       ← Optional log file (set LOG_FILE to enable)
 
 C:\Users\<you>\Documents\               ← Your input documents (any path)
-    (pass any path to the ingest_file tool — no constraints)
+    (give Claude the full path — see Add Your Documents)
 ```
 
 For the `.exe` option, the embedding model is bundled **inside** the exe.
@@ -159,10 +190,12 @@ All paths are overridable via `.env` or the `env` block in `claude_desktop_confi
 |---------|-----|
 | `onnxruntime` has no wheel for `cp314` | Python 3.14 is not yet supported; run `uv python install 3.13` then re-run the setup script |
 | `DLL load failed` or `VCRUNTIME140.dll not found` | Install [Visual C++ Redistributable 2019+](https://aka.ms/vs/17/release/vc_redist.x64.exe) and restart |
+| "running scripts is disabled on this system" | Run the script with `powershell -ExecutionPolicy Bypass -File .\scripts\setup-windows.ps1` |
 | `uv: command not found` in PowerShell | Run `irm https://astral.sh/uv/install.ps1 \| iex`, then open a new terminal |
 | Claude Desktop shows no tools | Verify the JSON in `claude_desktop_config.json` is valid; check paths are correct |
 | Server hangs on first start (Python option) | Model may not have been pre-downloaded — run `uv run mcpvectordb-download-model` |
 | `ingest_file` error: path not found | Use a full absolute path (e.g. `C:\Users\you\Documents\report.pdf`); `~\` is also supported |
+| `Cannot ingest 'x.jpg'` / `'x.doc'` / `'x.mp3'` | Format not supported; the message says what to do (run OCR, save as `.docx`/`.pptx`, transcribe locally) |
 | `.exe` antivirus warning | Add `mcpvectordb.exe` to your antivirus exclusions; false-positive common with PyInstaller bundles |
 | `.exe` first launch slow (5–10 s) | Normal — PyInstaller extracts the bundle to a temp directory on first launch |
 | Cryptic Arrow error in `table.add()` or schema mismatch on ingest | `EMBEDDING_DIMENSION` or `EMBEDDING_MODEL` is set as a shell/system environment variable and is overriding `.env`. Remove those variables from your environment — let pydantic-settings read them exclusively from `.env`. |
