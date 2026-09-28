@@ -404,6 +404,26 @@ class TestIngestDedup:
     """Deduplication scenarios — all three cases."""
 
     @pytest.mark.integration
+    def test_concurrent_ingests_of_one_source_leave_one_document(
+        self, store, mock_embedder, _patch_chunker
+    ):
+        """Racing ingests of the same source must not both survive in the index."""
+        from mcpvectordb.ingestor import ingest_content
+
+        async def _race():
+            return await asyncio.gather(
+                ingest_content("version one", "notes.md", "default", None, store),
+                ingest_content("version two", "notes.md", "default", None, store),
+            )
+
+        # Create the table first so only the dedup race is exercised.
+        run(ingest_content("other", "other.md", "other", None, store))
+        results = run(_race())
+        docs = store.list_documents(library="default", limit=10, offset=0)
+        assert len(docs) == 1
+        assert sorted(r.status for r in results) == ["indexed", "replaced"]
+
+    @pytest.mark.integration
     def test_dedup_same_hash_returns_skipped(
         self, tmp_path, store, mock_embedder, _patch_chunker, _patch_converter
     ):

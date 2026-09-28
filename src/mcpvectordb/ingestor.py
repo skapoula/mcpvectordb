@@ -7,7 +7,8 @@ import json
 import logging
 import socket
 import uuid
-from collections.abc import Iterable
+from collections.abc import AsyncIterator, Iterable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -190,41 +191,42 @@ async def ingest(
         except OSError:
             last_modified = ""
 
-    # ── 2. Dedup check (before the expensive conversion) ───────────────────────
-    new_hash = hashlib.sha256(raw_bytes).hexdigest()
-    skipped, existing_doc_id = await _dedup(store, source_str, library, new_hash)
-    if skipped:
-        return skipped
+    async with _source_lock(source_str, library):
+        # ── 2. Dedup check (before the expensive conversion) ───────────────────────
+        new_hash = hashlib.sha256(raw_bytes).hexdigest()
+        skipped, existing_doc_id = await _dedup(store, source_str, library, new_hash)
+        if skipped:
+            return skipped
 
-    # ── 3. Convert to Markdown ─────────────────────────────────────────────────
-    if is_url:
-        text = await _convert_html_bytes(raw_bytes, source_str)
-    else:
-        try:
-            text = await asyncio.to_thread(convert, path)
-        except UnsupportedFormatError:
-            raise
-        except Exception as e:
-            raise IngestionError(f"Conversion failed for {source_str!r}") from e
+        # ── 3. Convert to Markdown ─────────────────────────────────────────────────
+        if is_url:
+            text = await _convert_html_bytes(raw_bytes, source_str)
+        else:
+            try:
+                text = await asyncio.to_thread(convert, path)
+            except UnsupportedFormatError:
+                raise
+            except Exception as e:
+                raise IngestionError(f"Conversion failed for {source_str!r}") from e
 
-    if not text.strip():
-        raise IngestionError(
-            f"No text could be extracted from {source_str!r}. "
-            "The file may be scanned/image-based, password-protected, or empty. "
-            "Try ingest_content to pass the text directly."
+        if not text.strip():
+            raise IngestionError(
+                f"No text could be extracted from {source_str!r}. "
+                "The file may be scanned/image-based, password-protected, or empty. "
+                "Try ingest_content to pass the text directly."
+            )
+
+        return await _index_text(
+            text=text,
+            source_str=source_str,
+            library=library,
+            metadata=metadata,
+            content_hash=new_hash,
+            existing_doc_id=existing_doc_id,
+            file_type=file_type,
+            last_modified=last_modified,
+            store=store,
         )
-
-    return await _index_text(
-        text=text,
-        source_str=source_str,
-        library=library,
-        metadata=metadata,
-        content_hash=new_hash,
-        existing_doc_id=existing_doc_id,
-        file_type=file_type,
-        last_modified=last_modified,
-        store=store,
-    )
 
 
 async def ingest_content(
@@ -254,29 +256,53 @@ async def ingest_content(
         IngestionError: If chunking, embedding, or storing fails.
     """
     source_str = source.strip() or "uploaded-content"
-    new_hash = hashlib.sha256(content.encode()).hexdigest()
-    skipped, existing_doc_id = await _dedup(store, source_str, library, new_hash)
-    if skipped:
-        return skipped
+    async with _source_lock(source_str, library):
+        new_hash = hashlib.sha256(content.encode()).hexdigest()
+        skipped, existing_doc_id = await _dedup(store, source_str, library, new_hash)
+        if skipped:
+            return skipped
 
-    if not content.strip():
-        raise IngestionError(
-            f"No text content provided for {source_str!r}. "
-            "Pass non-empty Markdown or plain text."
+        if not content.strip():
+            raise IngestionError(
+                f"No text content provided for {source_str!r}. "
+                "Pass non-empty Markdown or plain text."
+            )
+
+        raw_ext = source_str.rsplit(".", 1)[-1].lower() if "." in source_str else ""
+        return await _index_text(
+            text=content,
+            source_str=source_str,
+            library=library,
+            metadata=metadata,
+            content_hash=new_hash,
+            existing_doc_id=existing_doc_id,
+            file_type=raw_ext if f".{raw_ext}" in SUPPORTED_EXTENSIONS else "text",
+            last_modified=datetime.now(UTC).isoformat(),
+            store=store,
         )
 
-    raw_ext = source_str.rsplit(".", 1)[-1].lower() if "." in source_str else ""
-    return await _index_text(
-        text=content,
-        source_str=source_str,
-        library=library,
-        metadata=metadata,
-        content_hash=new_hash,
-        existing_doc_id=existing_doc_id,
-        file_type=raw_ext if f".{raw_ext}" in SUPPORTED_EXTENSIONS else "text",
-        last_modified=datetime.now(UTC).isoformat(),
-        store=store,
-    )
+
+# (source, library) -> (lock, number of callers holding or awaiting it)
+_source_locks: dict[tuple[str, str], tuple[asyncio.Lock, int]] = {}
+
+
+@asynccontextmanager
+async def _source_lock(source_str: str, library: str) -> AsyncIterator[None]:
+    """Serialise ingests of one (source, library) so dedup-then-replace is atomic."""
+    # ponytail: in-process only; a second server or a concurrent
+    # mcpvectordb-ingest CLI run can still race. Needs a store-level lock then.
+    key = (source_str, library)
+    lock, users = _source_locks.get(key, (asyncio.Lock(), 0))
+    _source_locks[key] = (lock, users + 1)
+    try:
+        async with lock:
+            yield
+    finally:
+        lock, users = _source_locks[key]
+        if users == 1:
+            del _source_locks[key]
+        else:
+            _source_locks[key] = (lock, users - 1)
 
 
 async def _dedup(
