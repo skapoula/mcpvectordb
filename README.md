@@ -5,7 +5,8 @@ pages to a private library on your computer, then ask Claude questions about the
 Claude Desktop conversation.
 
 Your documents and the search index stay on your machine. No account or cloud database
-is needed.
+is needed. The one exception is audio transcription; see
+[Supported file types](#supported-file-types).
 
 ## What you need
 
@@ -120,17 +121,85 @@ Start a new conversation in Claude Desktop and ask:
 
 Claude answers that there are no libraries yet. That means the connection works.
 
-## Use it
+## Add your documents
 
-Ask Claude in plain language. For example:
+Your library starts empty. Load documents in one of these ways. Always give the **full
+path** to the file or folder; the server reads it from your disk, so you do not attach
+anything to the chat.
 
-- _"Add `C:\Users\me\Documents\contract.pdf` to my library."_
-- _"Add the page https://example.com/guide to a library called research."_
-- _"Search my documents for the notice period in the contract."_
-- _"Which documents are in my library?"_
+### Ask Claude (easiest)
 
-Give the full path to a file on your computer. The server reads the file itself, so
-you do not need to attach it to the chat.
+In a Claude Desktop conversation, ask in plain language:
+
+- One file: *"Add `C:\Users\me\Documents\contract.pdf` to my library."*
+- A whole folder, including its subfolders:
+  *"Add every document in `/Users/me/Documents/Reports` to a library called reports."*
+- A web page: *"Add https://example.com/guide to a library called research."*
+
+Claude replies with how many documents were added. A folder can take a while: each file
+is read, split into passages, and indexed. Files that cannot be read are listed as
+failed; the rest are still added.
+
+**Libraries** are named collections, such as `work` or `research`. If you do not name
+one, documents go into `default`. You can later search one library or all of them.
+
+### Load a large folder from the command line
+
+For hundreds of files, loading outside Claude avoids a long wait in the chat. In
+PowerShell or Terminal, go to the mcpvectordb folder and run (Windows first, then macOS
+or Linux):
+
+```powershell
+uv run mcpvectordb-ingest "C:\Users\me\Documents\Reports" --library reports
+```
+
+```bash
+uv run mcpvectordb-ingest "/Users/me/Documents/Reports" --library reports
+```
+
+When it finishes, it prints how many files were added, skipped or failed, and why each
+failure happened.
+
+You can list several files or folders. Add `--no-recursive` to skip subfolders.
+Documents loaded this way appear in Claude straight away.
+
+### Updating documents
+
+Adding the same file again is safe. An unchanged file is skipped. A changed file
+replaces its old version, so run the same request or command again after you edit your
+documents.
+
+## Supported file types
+
+| Works well | File types |
+| --- | --- |
+| PDF | `.pdf` (must contain text; see below) |
+| Word | `.docx` |
+| PowerPoint | `.pptx` |
+| Excel | `.xlsx`, `.xls` |
+| Web pages | `.html`, `.htm`, or any `http`/`https` link |
+| Text and data | `.txt`, `.md`, `.csv`, `.json`, `.xml` |
+| Archives | `.zip` containing any of the above |
+
+Not supported in practice:
+
+- **Scanned PDFs and photos** (`.jpg`, `.png`, and other images): there is no text
+  recognition (OCR), so pages that are pictures of text produce nothing. Run them
+  through an OCR tool first, or copy the text into a `.txt` file.
+- **Old Office formats** (`.doc`, `.ppt`): open them in Word or PowerPoint and save as
+  `.docx` or `.pptx`.
+- **Audio** (`.mp3`, `.wav`, `.m4a`, `.ogg`): needs [ffmpeg](https://ffmpeg.org)
+  installed, and the transcription sends the audio to Google's speech service, so it
+  does not stay on your machine.
+
+## Ask questions
+
+Once documents are loaded, ask Claude about them:
+
+- *"Search my documents for the notice period in the contract."*
+- *"What do my reports say about Q3 revenue? Only search the reports library."*
+- *"Which documents are in my library?"*
+- *"Remove contract.pdf from my library."*
 
 ## If something goes wrong
 
