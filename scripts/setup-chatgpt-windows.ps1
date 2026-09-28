@@ -83,15 +83,7 @@ uv sync --python 3.13
 if ($LASTEXITCODE -ne 0) { Write-Fail "uv sync failed" }
 Write-OK "Dependencies installed"
 
-# ── Step 4: Download embedding model ──────────────────────────────────────────
-
-Write-Step "Downloading embedding model (nomic-embed-text-v1.5, ~500 MB)..."
-Write-Host "    This is a one-time download. Skip with Ctrl+C if already done." -ForegroundColor Yellow
-uv run mcpvectordb-download-model
-if ($LASTEXITCODE -ne 0) { Write-Warn "Model download failed — server will re-attempt on first run." }
-else { Write-OK "Embedding model ready" }
-
-# ── Step 5: Create data directories ───────────────────────────────────────────
+# ── Step 4: Create data directories ───────────────────────────────────────────
 
 Write-Step "Creating data directories..."
 
@@ -111,6 +103,19 @@ foreach ($Dir in @($LanceDir, $ModelsDir)) {
         Write-OK "Already exists: $Dir"
     }
 }
+
+# ── Step 5: Download embedding model ──────────────────────────────────────────
+# Into the ProgramData cache the service reads. Without these variables the
+# download lands in this user's default cache, where the SYSTEM service never
+# looks, and the service fails to start for lack of the tokenizer.
+
+Write-Step "Downloading embedding model and tokenizer (nomic-embed-text-v1.5, ~600 MB)..."
+Write-Host "    This is a one-time download. Skip with Ctrl+C if already done." -ForegroundColor Yellow
+$env:FASTEMBED_CACHE_PATH = $ModelsDir
+$env:HF_HOME = $ModelsDir
+uv run mcpvectordb-download-model
+if ($LASTEXITCODE -ne 0) { Write-Warn "Model download failed. Re-run this script before starting the service." }
+else { Write-OK "Embedding model ready in $ModelsDir" }
 
 # ── Step 6: Generate .env ─────────────────────────────────────────────────────
 
@@ -140,7 +145,7 @@ if (Test-Path $EnvFile) {
 # Edit as needed; never commit this file.
 
 MCP_TRANSPORT=streamable-http
-MCP_HOST=0.0.0.0
+MCP_HOST=127.0.0.1
 MCP_PORT=8000
 
 LANCEDB_URI=$LanceDir
@@ -265,7 +270,26 @@ if ($existingService) {
 # Backslashes in values must be doubled (\\) per servy-cli escaping rules.
 $LanceDirEsc  = $LanceDir  -replace '\\', '\\'
 $ModelsDirEsc = $ModelsDir -replace '\\', '\\'
-$EnvVars = "MCP_TRANSPORT=streamable-http;MCP_HOST=0.0.0.0;MCP_PORT=$McpPort;LANCEDB_URI=$LanceDirEsc;FASTEMBED_CACHE_PATH=$ModelsDirEsc;HF_HOME=$ModelsDirEsc;LOG_LEVEL=INFO"
+$EnvVars = "MCP_TRANSPORT=streamable-http;MCP_HOST=127.0.0.1;MCP_PORT=$McpPort;LANCEDB_URI=$LanceDirEsc;FASTEMBED_CACHE_PATH=$ModelsDirEsc;HF_HOME=$ModelsDirEsc;LOG_LEVEL=INFO"
+
+# Loopback only: the service runs as SYSTEM with no auth, so it must not be reachable
+# from the network. tailscale serve reaches it on 127.0.0.1 and forwards the tailnet
+# hostname as Host, which FastMCP rejects on a loopback bind unless it is allowed.
+$AllowedHosts = $env:ALLOWED_HOSTS
+if (-not $AllowedHosts -and (Get-Command tailscale -ErrorAction SilentlyContinue)) {
+    try {
+        $AllowedHosts = ((tailscale status --json | Out-String | ConvertFrom-Json).Self.DNSName).TrimEnd(".")
+    } catch {
+        $AllowedHosts = $null
+    }
+}
+if ($AllowedHosts) {
+    $EnvVars += ";ALLOWED_HOSTS=$AllowedHosts"
+    Write-OK "Allowing Host header: $AllowedHosts"
+} else {
+    Write-Warn "Tailscale hostname not found; ChatGPT requests will get HTTP 421 (Invalid Host header)."
+    Write-Warn "Install and log in to Tailscale, or set `$env:ALLOWED_HOSTS='<your-tailscale-hostname>', then re-run."
+}
 
 # Build argument list as an array so PowerShell does not tokenise on semicolons inside $EnvVars.
 # Each array element becomes exactly one argument passed to the process.
@@ -313,11 +337,11 @@ Write-Host ""
 Write-Host "  mcpvectordb is now running as a Windows service." -ForegroundColor White
 Write-Host "  It will start automatically at every login." -ForegroundColor White
 Write-Host ""
-Write-Host "  The server is running on http://0.0.0.0:${McpPort}/mcp" -ForegroundColor White
+Write-Host "  The server is running on http://127.0.0.1:${McpPort}/mcp (this PC only)" -ForegroundColor White
 Write-Host ""
 Write-Host "  ChatGPT Desktop requires HTTPS. Use Tailscale serve to expose the server:" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "      tailscale serve --bg http://localhost:${McpPort}" -ForegroundColor White
+Write-Host "      tailscale serve --bg http://127.0.0.1:${McpPort}" -ForegroundColor White
 Write-Host ""
 Write-Host "  Then paste the resulting URL (with /mcp appended) into ChatGPT Desktop:" -ForegroundColor Yellow
 Write-Host "  Settings → Apps → Advanced settings → Developer mode" -ForegroundColor Yellow
