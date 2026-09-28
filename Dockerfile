@@ -1,21 +1,11 @@
 FROM python:3.11-slim-bookworm
 
 # ── System packages ──────────────────────────────────────────────────────────
-# MEDIA_FORMATS=true adds ffmpeg (audio transcription) and tesseract-ocr (image
-# OCR) via markitdown[all]. Omit for a ~100 MB slimmer image; those two ingest
-# formats simply return UnsupportedFormatError at runtime.
-#   Full:  podman build --build-arg MEDIA_FORMATS=true -t mcpvectordb:0.1.0-full .
-#   Slim:  podman build -t mcpvectordb:0.1.0 .          (default)
-ARG MEDIA_FORMATS=false
-
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libmagic1 \
         libmagic-dev \
         curl \
-    && if [ "$MEDIA_FORMATS" = "true" ]; then \
-         apt-get install -y --no-install-recommends ffmpeg tesseract-ocr; \
-       fi \
     && rm -rf /var/lib/apt/lists/*
 
 # ── uv ───────────────────────────────────────────────────────────────────────

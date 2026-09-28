@@ -5,8 +5,7 @@ pages to a private library on your computer, then ask Claude questions about the
 Claude Desktop conversation.
 
 Your documents and the search index stay on your machine. No account or cloud database
-is needed. The one exception is audio transcription; see
-[Supported file types](#supported-file-types).
+is needed.
 
 ## What you need
 
@@ -188,9 +187,9 @@ Not supported in practice:
   through an OCR tool first, or copy the text into a `.txt` file.
 - **Old Office formats** (`.doc`, `.ppt`): open them in Word or PowerPoint and save as
   `.docx` or `.pptx`.
-- **Audio** (`.mp3`, `.wav`, `.m4a`, `.ogg`): needs [ffmpeg](https://ffmpeg.org)
-  installed, and the transcription sends the audio to Google's speech service, so it
-  does not stay on your machine.
+- **Audio** (`.mp3`, `.wav`, `.m4a`, `.ogg`): transcription would send the recording to
+  Google's speech service, so audio is refused. Transcribe it on your computer and add
+  the text instead.
 
 ## Ask questions
 

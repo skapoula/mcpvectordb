@@ -80,26 +80,41 @@ class TestHtmlConverter:
         assert "Sample" in result
 
 
-class TestImageConverter:
-    """Tests for image → Markdown conversion (OCR — slow)."""
+class TestFormatsWithoutUsableText:
+    """Formats MarkItDown cannot turn into text here are rejected up front."""
 
-    @pytest.mark.slow
-    @pytest.mark.integration
-    def test_converts_to_markdown(self, sample_image):
-        """Image fixture produces a (possibly empty) string without error."""
-        result = convert(sample_image)
-        assert isinstance(result, str)
+    @pytest.mark.unit
+    def test_image_rejected_with_ocr_hint(self, sample_image):
+        """Images carry no text without OCR, so they are refused, not indexed empty."""
+        with pytest.raises(UnsupportedFormatError, match="OCR"):
+            convert(sample_image)
 
+    @pytest.mark.unit
+    def test_audio_rejected_with_privacy_reason(self, sample_audio):
+        """Audio transcription would send the file to a cloud service."""
+        with pytest.raises(UnsupportedFormatError, match="speech service"):
+            convert(sample_audio)
 
-class TestAudioConverter:
-    """Tests for audio → Markdown transcription (slow)."""
+    @pytest.mark.unit
+    @pytest.mark.parametrize(("ext", "modern"), [(".doc", ".docx"), (".ppt", ".pptx")])
+    def test_legacy_office_rejected_with_resave_hint(self, tmp_path, ext, modern):
+        """Legacy Office files have no converter; the error names the fix."""
+        f = tmp_path / f"old{ext}"
+        f.write_bytes(b"\xd0\xcf\x11\xe0")  # OLE2 header
+        with pytest.raises(UnsupportedFormatError, match=modern):
+            convert(f)
 
-    @pytest.mark.slow
-    @pytest.mark.integration
-    def test_converts_to_markdown(self, sample_audio):
-        """Audio fixture produces a string without error."""
-        result = convert(sample_audio)
-        assert isinstance(result, str)
+    @pytest.mark.unit
+    def test_zip_with_audio_rejected(self, tmp_path, sample_audio):
+        """A ZIP would transcribe audio members through the cloud; refuse it."""
+        import zipfile
+
+        archive = tmp_path / "bundle.zip"
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("notes.txt", "hello")
+            zf.write(sample_audio, "Voice Memo.MP3")
+        with pytest.raises(UnsupportedFormatError, match="Voice Memo.MP3"):
+            convert(archive)
 
 
 class TestUnsupportedFormat:

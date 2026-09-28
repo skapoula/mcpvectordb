@@ -30,9 +30,11 @@ Convert a local file and index it in the vector store.
 | `library` | string | No | `"default"` | Library (collection) to index into |
 | `metadata` | object \| null | No | `null` | Arbitrary key-value metadata to attach |
 
-**Supported file types:** `.pdf`, `.docx`, `.doc`, `.pptx`, `.ppt`, `.xlsx`, `.xls`,
-`.html`, `.htm`, `.txt`, `.md`, `.csv`, `.json`, `.xml`, `.jpg`, `.jpeg`, `.png`,
-`.gif`, `.bmp`, `.webp`, `.mp3`, `.wav`, `.ogg`, `.m4a`, `.zip`
+**Supported file types:** `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.xls`, `.html`, `.htm`,
+`.txt`, `.md`, `.csv`, `.json`, `.xml`, `.zip`. Images, audio, `.doc` and `.ppt` are
+refused with `UnsupportedFormatError` naming the reason (no OCR; audio transcription
+would use a cloud service; legacy Office needs re-saving as `.docx`/`.pptx`). A `.zip`
+containing audio is refused for the same reason.
 
 **Success response:**
 

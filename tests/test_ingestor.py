@@ -770,6 +770,21 @@ class TestIngestFolder:
         assert result.indexed == 1
 
     @pytest.mark.integration
+    async def test_ingest_folder_ignores_formats_without_text(
+        self, tmp_path, store, mock_embedder, _patch_chunker, _patch_converter
+    ):
+        """Photos, audio and legacy Office files in a folder are not attempted."""
+        (tmp_path / "doc.pdf").write_bytes(b"%PDF minimal")
+        for name in ("photo.jpg", "scan.png", "memo.mp3", "old.doc", "old.ppt"):
+            (tmp_path / name).write_bytes(b"x")
+
+        result = await ingest_folder(
+            folder=tmp_path, library="default", metadata=None, store=store
+        )
+
+        assert (result.total_files, result.indexed, result.failed) == (1, 1, 0)
+
+    @pytest.mark.integration
     async def test_ingest_folder_recursive_finds_nested_files(
         self, tmp_path, store, mock_embedder, _patch_chunker, _patch_converter
     ):

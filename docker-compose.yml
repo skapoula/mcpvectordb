@@ -27,9 +27,6 @@ services:
     image: mcpvectordb:0.1.0
     build:
       context: .
-      # Uncomment to build with audio (ffmpeg) and OCR (tesseract) support:
-      # args:
-      #   MEDIA_FORMATS: "true"
     restart: unless-stopped
 
     # ── NETWORK — pick ONE (network_mode: host and ports: cannot coexist) ────────
