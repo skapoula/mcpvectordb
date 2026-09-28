@@ -25,10 +25,11 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 # fastembed uses ONNX Runtime instead of PyTorch — no torch pre-install needed.
 WORKDIR /app
 
-COPY pyproject.toml ./
+COPY pyproject.toml uv.lock ./
 COPY src/ ./src/
 
-RUN uv pip install --system .
+RUN uv sync --frozen --no-dev --python /usr/local/bin/python
+ENV PATH="/app/.venv/bin:$PATH"
 
 # ── Embedding model (baked into the image) ────────────────────────────────────
 # Download the ONNX model at build time so the container starts instantly with
