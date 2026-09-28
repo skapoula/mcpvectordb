@@ -83,15 +83,7 @@ uv sync --python 3.13
 if ($LASTEXITCODE -ne 0) { Write-Fail "uv sync failed" }
 Write-OK "Dependencies installed"
 
-# ── Step 4: Download embedding model ──────────────────────────────────────────
-
-Write-Step "Downloading embedding model (nomic-embed-text-v1.5, ~500 MB)..."
-Write-Host "    This is a one-time download. Skip with Ctrl+C if already done." -ForegroundColor Yellow
-uv run mcpvectordb-download-model
-if ($LASTEXITCODE -ne 0) { Write-Warn "Model download failed — server will re-attempt on first run." }
-else { Write-OK "Embedding model ready" }
-
-# ── Step 5: Create data directories ───────────────────────────────────────────
+# ── Step 4: Create data directories ───────────────────────────────────────────
 
 Write-Step "Creating data directories..."
 
@@ -111,6 +103,19 @@ foreach ($Dir in @($LanceDir, $ModelsDir)) {
         Write-OK "Already exists: $Dir"
     }
 }
+
+# ── Step 5: Download embedding model ──────────────────────────────────────────
+# Into the ProgramData cache the service reads. Without these variables the
+# download lands in this user's default cache, where the SYSTEM service never
+# looks, and the service fails to start for lack of the tokenizer.
+
+Write-Step "Downloading embedding model and tokenizer (nomic-embed-text-v1.5, ~600 MB)..."
+Write-Host "    This is a one-time download. Skip with Ctrl+C if already done." -ForegroundColor Yellow
+$env:FASTEMBED_CACHE_PATH = $ModelsDir
+$env:HF_HOME = $ModelsDir
+uv run mcpvectordb-download-model
+if ($LASTEXITCODE -ne 0) { Write-Warn "Model download failed. Re-run this script before starting the service." }
+else { Write-OK "Embedding model ready in $ModelsDir" }
 
 # ── Step 6: Generate .env ─────────────────────────────────────────────────────
 
