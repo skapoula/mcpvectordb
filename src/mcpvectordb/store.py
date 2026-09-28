@@ -96,7 +96,8 @@ def _open_table(uri: str, table_name: str) -> lancedb.table.Table:
             _migrate_table(table)
         else:
             # Create table with an explicit PyArrow schema — no dummy record needed.
-            table = db.create_table(table_name, schema=_lance_schema())
+            # exist_ok: a concurrent writer may create it between list and create.
+            table = db.create_table(table_name, schema=_lance_schema(), exist_ok=True)
         return table
     except StoreError:
         raise

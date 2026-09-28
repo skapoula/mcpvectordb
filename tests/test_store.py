@@ -384,6 +384,18 @@ class TestListDocuments:
 class TestStoreErrors:
     """Tests that StoreError is raised when LanceDB operations fail."""
 
+    @pytest.mark.integration
+    def test_open_table_survives_losing_create_race(self, tmp_path, monkeypatch):
+        """Another writer creating the table between list and create is not an error."""
+        from lancedb.db import LanceDBConnection
+
+        from mcpvectordb.store import _open_table
+
+        uri = str(tmp_path / "lancedb")
+        _open_table(uri, "docs")  # the other writer wins the race
+        monkeypatch.setattr(LanceDBConnection, "list_tables", lambda self, **kw: [])
+        assert _open_table(uri, "docs").name == "docs"
+
     @pytest.mark.unit
     def test_open_table_raises_store_error_on_connect_failure(self, monkeypatch):
         """_open_table raises StoreError when lancedb.connect fails."""
