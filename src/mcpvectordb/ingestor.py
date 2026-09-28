@@ -7,9 +7,11 @@ import json
 import logging
 import socket
 import uuid
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httpcore
 import httpx
 from pydantic import BaseModel
 
@@ -399,35 +401,79 @@ async def _index_text(
     )
 
 
-def _check_public_host(url: str) -> None:
-    """Raise IngestionError if *url*'s host resolves to a non-public address.
+def _public_addresses(host: str, url: str) -> list[str]:
+    """Resolve *host* and return its addresses if every one is globally routable.
 
     Args:
-        url: Absolute http(s) URL about to be requested.
+        host: Hostname or IP literal to resolve.
+        url: The URL being fetched, for the error message.
+
+    Returns:
+        The resolved IP addresses, in resolver order.
 
     Raises:
         IngestionError: If the host cannot be resolved or any of its addresses
             is private, loopback, link-local, or otherwise not globally routable.
     """
-    host = httpx.URL(url).host
     try:
         infos = socket.getaddrinfo(host, None)
     except OSError as e:
         raise IngestionError(f"Cannot resolve host {host!r}") from e
-    for info in infos:
-        ip = ipaddress.ip_address(str(info[4][0]).split("%")[0])
-        if not ip.is_global:
+    addresses = [str(info[4][0]).split("%")[0] for info in infos]
+    for addr in addresses:
+        if not ipaddress.ip_address(addr).is_global:
             raise IngestionError(
                 f"Refusing to fetch {url!r}: {host!r} resolves to non-public address "
-                f"{ip}. Set ALLOW_PRIVATE_URLS=true to allow internal URLs."
+                f"{addr}. Set ALLOW_PRIVATE_URLS=true to allow internal URLs."
             )
+    return addresses
 
 
 async def _guard_request(request: httpx.Request) -> None:
-    """httpx request hook: apply the public-address check to every hop."""
-    # ponytail: check-then-connect leaves a DNS-rebinding window; pin the
-    # resolved IP in a custom transport if that threat matters.
-    await asyncio.to_thread(_check_public_host, str(request.url))
+    """httpx request hook: fail fast on a non-public host before any connection."""
+    url = str(request.url)
+    await asyncio.to_thread(_public_addresses, request.url.host, url)
+
+
+class _PinnedBackend(httpcore.AsyncNetworkBackend):
+    """Network backend that connects only to an address that passed the check.
+
+    Resolving once and dialling that IP closes the DNS-rebinding window a
+    check-then-connect guard leaves. TLS SNI and certificate checks still use
+    the original hostname, which httpcore passes to start_tls separately.
+    """
+
+    def __init__(self) -> None:
+        self._inner = httpcore.AnyIOBackend()
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Iterable[httpcore.SOCKET_OPTION] | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        """Resolve and check *host*, then connect to the first checked address."""
+        url = f"{host}:{port}"
+        addresses = await asyncio.to_thread(_public_addresses, host, url)
+        return await self._inner.connect_tcp(
+            addresses[0], port, timeout, local_address, socket_options
+        )
+
+    async def sleep(self, seconds: float) -> None:
+        """Delegate to the default backend."""
+        await self._inner.sleep(seconds)
+
+
+def _guarded_transport() -> httpx.AsyncHTTPTransport:
+    """Return an httpx transport whose connections go through _PinnedBackend."""
+    transport = httpx.AsyncHTTPTransport()
+    # ponytail: httpx exposes no network_backend option; this sets httpcore's
+    # pool attribute directly. Re-check on httpx/httpcore upgrades (the
+    # DNS-rebinding test fails if it stops taking effect).
+    transport._pool._network_backend = _PinnedBackend()
+    return transport
 
 
 async def _fetch_url(url: str) -> tuple[bytes, str]:
@@ -449,6 +495,9 @@ async def _fetch_url(url: str) -> tuple[bytes, str]:
             headers={"User-Agent": settings.http_user_agent},
             follow_redirects=True,
             event_hooks={"request": [_guard_request]} if guarded else {},
+            # A custom transport also disables env proxies, which would resolve
+            # the target themselves and bypass the pin.
+            transport=_guarded_transport() if guarded else None,
         ) as client:
             response = await client.get(url)
             response.raise_for_status()

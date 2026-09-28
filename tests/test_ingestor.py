@@ -331,6 +331,40 @@ class TestIngestURLPrivateAddressGuard:
             run(ingest("https://example.com/r", "web", None, store))
 
     @pytest.mark.integration
+    def test_dns_rebinding_blocked(
+        self, store, mock_embedder, _network_transport, monkeypatch
+    ):
+        """A host that turns private after the first lookup is never connected to."""
+        import socket
+
+        answers = iter(["93.184.216.34"])
+
+        def _rebinding(host, *args, **kwargs):
+            ip = next(answers, "127.0.0.1")
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))]
+
+        monkeypatch.setattr(socket, "getaddrinfo", _rebinding)
+        with pytest.raises(IngestionError, match="non-public address"):
+            run(ingest("http://rebind.test:9/", "web", None, store))
+
+    @pytest.mark.unit
+    def test_pinned_backend_connects_to_checked_address(self, _resolve, monkeypatch):
+        """The socket opens to the IP that passed the check, not a fresh lookup."""
+        from mcpvectordb.ingestor import _PinnedBackend
+
+        _resolve["example.com"] = "93.184.216.34"
+        backend = _PinnedBackend()
+        hosts = []
+
+        async def _connect(host, port, *args, **kwargs):
+            hosts.append(host)
+            return "stream"
+
+        monkeypatch.setattr(backend._inner, "connect_tcp", _connect)
+        assert run(backend.connect_tcp("example.com", 443)) == "stream"
+        assert hosts == ["93.184.216.34"]
+
+    @pytest.mark.integration
     def test_stdio_allows_private_address(
         self, store, mock_embedder, _patch_chunker, _resolve, httpx_mock, monkeypatch
     ):
