@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from mcpvectordb.config import settings
-from mcpvectordb.store import ChunkRecord
+from mcpvectordb.store import ChunkRecord, Store
 
 
 def _make_chunk(
@@ -710,6 +710,10 @@ class TestStoreSchemaMigration:
         assert "file_type" in col_names
         assert "last_modified" in col_names
         assert "page" in col_names
+        assert "overlap" in col_names
+        assert [
+            r.overlap for r in Store(str(lancedb_dir), "old_docs").get_document("d1")
+        ] == [0]
 
     @pytest.mark.integration
     def test_migrate_is_idempotent(self, lancedb_dir):

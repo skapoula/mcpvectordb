@@ -138,10 +138,10 @@ class TestChunkInternals:
     @pytest.mark.unit
     def test_split_recursive_base_case_empty_separators(self):
         """_split_recursive returns [text] unchanged when no separators remain."""
-        from mcpvectordb.chunker import _split_recursive
+        from mcpvectordb.chunker import Chunk, _split_recursive
 
         result = _split_recursive("some text that cannot be split further", [], 512, 64)
-        assert result == ["some text that cannot be split further"]
+        assert result == [Chunk(text="some text that cannot be split further")]
 
 
 class TestChunkTextFidelity:
@@ -175,27 +175,52 @@ class TestChunkTextFidelity:
 
 
 class TestJoinChunks:
-    """join_chunks reassembles a document from its overlapping chunks."""
+    """join_chunks rebuilds a document from chunks and their recorded overlap."""
 
     @pytest.mark.unit
-    def test_round_trip_removes_overlap(self):
-        """Joining the chunks of a document reproduces the document exactly."""
-        from mcpvectordb.chunker import chunk, join_chunks
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "\n\n".join(
+                f"Paragraph {i}. " + " ".join(f"word{i}x{j}" for j in range(60))
+                for i in range(30)
+            ),
+            " ".join(["word"] * 1200),
+            "ErrorCode-E4021/NodePort.Kubernetes_" * 300,
+        ],
+        ids=["paragraphs", "repetitive", "unsplittable"],
+    )
+    def test_round_trip_is_exact(self, text):
+        """Joining a document's chunks reproduces it, even for repetitive text."""
+        from mcpvectordb.chunker import chunk_with_overlap, join_chunks
 
-        paras = [
-            f"Paragraph {i}. " + " ".join(f"word{i}x{j}" for j in range(60))
-            for i in range(30)
-        ]
-        text = "\n\n".join(paras)
-        result = chunk(text)
-        assert len(result) > 2
+        result = chunk_with_overlap(text)
+        assert len(result) > 1
+        assert any(c.overlap > 0 for c in result)
         assert join_chunks(result) == text
+
+    @pytest.mark.unit
+    def test_chunk_returns_the_same_texts(self):
+        """chunk() is chunk_with_overlap() without the overlap counts."""
+        from mcpvectordb.chunker import chunk, chunk_with_overlap
+
+        text = " ".join(["word"] * 1200)
+        assert chunk(text) == [c.text for c in chunk_with_overlap(text)]
+
+    @pytest.mark.unit
+    def test_short_chunk_merge_keeps_every_word(self):
+        """Merging a short chunk into its neighbour loses and repeats nothing."""
+        from mcpvectordb.chunker import chunk_with_overlap, join_chunks
+
+        text = "Word " * 700 + "\n\nZebracorn closing remark."
+        rebuilt = join_chunks(chunk_with_overlap(text))
+        assert rebuilt.count("Word") == 700
+        assert rebuilt.endswith("Zebracorn closing remark.")
 
     @pytest.mark.unit
     def test_chunks_without_overlap_are_separated_by_blank_line(self):
         """Neighbours that share no text are joined with a paragraph break."""
-        from mcpvectordb.chunker import join_chunks
+        from mcpvectordb.chunker import Chunk, join_chunks
 
-        assert join_chunks(["Page one text.", "Page two text."]) == (
-            "Page one text.\n\nPage two text."
-        )
+        pages = [Chunk(text="Page one text."), Chunk(text="Page two text.")]
+        assert join_chunks(pages) == "Page one text.\n\nPage two text."

@@ -18,9 +18,12 @@ def run(coro):
 @pytest.fixture
 def _patch_chunker(monkeypatch):
     """Patch chunker.chunk to return three synthetic chunks without tokenizing."""
+    from mcpvectordb.chunker import Chunk
+
+    texts = ["chunk one", "chunk two", "chunk three"]
     monkeypatch.setattr(
-        "mcpvectordb.ingestor.chunk",
-        lambda text: ["chunk one", "chunk two", "chunk three"] if text.strip() else [],
+        "mcpvectordb.ingestor.chunk_with_overlap",
+        lambda text: [Chunk(text=t) for t in texts] if text.strip() else [],
     )
 
 
@@ -400,6 +403,38 @@ class TestIngestURLPrivateAddressGuard:
         )
 
 
+class TestIngestOverlap:
+    """Each stored chunk records how much of the previous chunk it repeats."""
+
+    @pytest.mark.integration
+    def test_chunk_overlap_is_stored(self, store, mock_embedder, monkeypatch):
+        """The overlap the chunker reports is written to each record."""
+        from mcpvectordb.chunker import Chunk
+        from mcpvectordb.ingestor import ingest_content
+
+        monkeypatch.setattr(
+            "mcpvectordb.ingestor.chunk_with_overlap",
+            lambda text: [Chunk(text="a b c"), Chunk(text="b c d", overlap=3)],
+        )
+        result = run(ingest_content("a b c d", "notes.md", "default", None, store))
+        assert [r.overlap for r in store.get_document(result.doc_id)] == [0, 3]
+
+    @pytest.mark.integration
+    def test_repetitive_document_rebuilds_exactly(self, store, mock_embedder):
+        """Real chunker, store and join: 1,200 repeated words come back intact."""
+        from mcpvectordb.chunker import Chunk, join_chunks
+        from mcpvectordb.ingestor import ingest_content
+
+        text = " ".join(["word"] * 1200)
+        result = run(ingest_content(text, "words.md", "default", None, store))
+        records = store.get_document(result.doc_id)
+        assert len(records) > 1
+        rebuilt = join_chunks(
+            [Chunk(text=r.content, overlap=r.overlap) for r in records]
+        )
+        assert rebuilt == text
+
+
 class TestIngestDedup:
     """Deduplication scenarios — all three cases."""
 
@@ -547,7 +582,7 @@ class TestIngestFileErrorPaths:
         def _bad_chunk(_text):
             raise RuntimeError("tokenizer crash")
 
-        monkeypatch.setattr("mcpvectordb.ingestor.chunk", _bad_chunk)
+        monkeypatch.setattr("mcpvectordb.ingestor.chunk_with_overlap", _bad_chunk)
 
         with pytest.raises(IngestionError, match="Chunking failed"):
             run(ingest(source=f, library="default", metadata=None, store=store))
@@ -560,7 +595,7 @@ class TestIngestFileErrorPaths:
         f = tmp_path / "doc.pdf"
         f.write_bytes(b"%PDF content")
 
-        monkeypatch.setattr("mcpvectordb.ingestor.chunk", lambda _text: [])
+        monkeypatch.setattr("mcpvectordb.ingestor.chunk_with_overlap", lambda _text: [])
 
         with pytest.raises(IngestionError, match="No usable chunks"):
             run(ingest(source=f, library="default", metadata=None, store=store))

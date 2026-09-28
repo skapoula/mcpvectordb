@@ -39,6 +39,9 @@ class ChunkRecord(BaseModel):
     file_type: str  # e.g. "pdf", "docx", "html", "url"; "unknown" if undetectable
     last_modified: str  # ISO 8601 from file mtime or HTTP Last-Modified; "" if unknown
     page: int  # 1-indexed page number; 0 = unknown or not applicable
+    # Leading characters of content repeated from the previous chunk; 0 for
+    # rows indexed before this column existed, which then rejoin with a gap.
+    overlap: int = 0
 
 
 def _lance_schema() -> pa.Schema:
@@ -65,6 +68,7 @@ def _lance_schema() -> pa.Schema:
             pa.field("file_type", pa.string()),
             pa.field("last_modified", pa.string()),
             pa.field("page", pa.int64()),
+            pa.field("overlap", pa.int64()),
         ]
     )
 
@@ -188,6 +192,8 @@ def _migrate_table(table: lancedb.table.Table) -> None:
         to_add["last_modified"] = "''"
     if "page" not in existing:
         to_add["page"] = "CAST(0 AS INT)"
+    if "overlap" not in existing:
+        to_add["overlap"] = "CAST(0 AS BIGINT)"
     if not to_add:
         return
     try:

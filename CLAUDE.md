@@ -224,6 +224,7 @@ class ChunkRecord(BaseModel):
     file_type: str        # e.g. "pdf", "docx", "html", "url"; "unknown" if undetectable
     last_modified: str    # ISO 8601 from file mtime or HTTP Last-Modified; "" if unknown
     page: int             # 1-indexed page number; 0 = not extracted / not applicable
+    overlap: int          # leading chars of content repeated from the previous chunk; 0 = none/legacy
 ```
 
 ---

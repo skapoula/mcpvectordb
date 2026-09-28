@@ -669,6 +669,7 @@ class TestGetDocumentTool:
                     file_type="md",
                     last_modified="",
                     page=0,
+                    overlap=len("The overlapping middle sentence.") if i else 0,
                 )
                 for i, text in enumerate(texts)
             ]

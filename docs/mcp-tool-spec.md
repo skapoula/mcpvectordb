@@ -225,7 +225,7 @@ Remove a document and all its chunks from the index.
 
 ### `get_document`
 
-Return the Markdown text of an indexed document, rebuilt from its chunks with the overlap between neighbouring chunks removed. Whitespace at chunk boundaries may differ from the source.
+Return the Markdown text of an indexed document, rebuilt from its chunks using the overlap each chunk recorded at ingest. Chunks that start fresh (a new page or section), and documents indexed before overlap was recorded, are joined with a blank line; their overlap text repeats rather than being dropped.
 
 **Input schema:**
 

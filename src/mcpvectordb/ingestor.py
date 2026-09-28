@@ -17,7 +17,7 @@ import httpx
 from filelock import FileLock, Timeout
 from pydantic import BaseModel
 
-from mcpvectordb.chunker import chunk
+from mcpvectordb.chunker import Chunk, chunk_with_overlap
 from mcpvectordb.config import settings
 from mcpvectordb.converter import SUPPORTED_EXTENSIONS, convert
 from mcpvectordb.embedder import get_embedder
@@ -369,11 +369,11 @@ async def _index_text(
     parts = text.split("\x0c")
     paged = len(parts) > 1 or file_type == "pdf"
     pages = list(enumerate(parts, start=1)) if paged else [(0, text)]
-    chunks: list[str] = []
+    chunks: list[Chunk] = []
     chunk_pages: list[int] = []
     try:
         for page_no, page_text in pages:
-            page_chunks = await asyncio.to_thread(chunk, page_text)
+            page_chunks = await asyncio.to_thread(chunk_with_overlap, page_text)
             chunks += page_chunks
             chunk_pages += [page_no] * len(page_chunks)
     except Exception as e:
@@ -382,7 +382,9 @@ async def _index_text(
         raise IngestionError(f"No usable chunks produced from {source_str!r}")
 
     try:
-        embeddings = await asyncio.to_thread(get_embedder().embed_documents, chunks)
+        embeddings = await asyncio.to_thread(
+            get_embedder().embed_documents, [c.text for c in chunks]
+        )
     except Exception as e:
         raise IngestionError(f"Embedding failed for {source_str!r}") from e
 
@@ -397,7 +399,7 @@ async def _index_text(
             source=source_str,
             content_hash=content_hash,
             title=title,
-            content=chunk_text,
+            content=c.text,
             embedding=embeddings[i].tolist(),
             chunk_index=i,
             created_at=now,
@@ -405,8 +407,9 @@ async def _index_text(
             file_type=file_type,
             last_modified=last_modified,
             page=chunk_pages[i],
+            overlap=c.overlap,
         )
-        for i, chunk_text in enumerate(chunks)
+        for i, c in enumerate(chunks)
     ]
     try:
         await asyncio.to_thread(store.upsert_chunks, records)

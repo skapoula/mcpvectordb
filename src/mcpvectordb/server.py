@@ -15,7 +15,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import Message, Receive, Scope, Send
 
-from mcpvectordb.chunker import join_chunks
+from mcpvectordb.chunker import Chunk, join_chunks
 from mcpvectordb.config import settings
 from mcpvectordb.converter import convert as _convert
 from mcpvectordb.embedder import get_embedder
@@ -374,8 +374,8 @@ async def delete_document(doc_id: str) -> dict:
 async def get_document(doc_id: str) -> dict:
     """Return the Markdown text of an indexed document, rebuilt from its chunks.
 
-    Joins the chunks in order and drops the text neighbouring chunks share.
-    Whitespace at chunk boundaries may differ from the original source.
+    Joins the chunks in order, dropping the overlap each chunk recorded at
+    ingest. Documents indexed before overlap was recorded repeat it instead.
 
     Args:
         doc_id: The document UUID to retrieve.
@@ -390,7 +390,9 @@ async def get_document(doc_id: str) -> dict:
         if not records:
             return {"error": f"Document not found: {doc_id}", "status": "error"}
         first = records[0]
-        full_text = join_chunks([r.content for r in records])
+        full_text = join_chunks(
+            [Chunk(text=r.content, overlap=r.overlap) for r in records]
+        )
         return {
             "doc_id": doc_id,
             "source": first.source,
