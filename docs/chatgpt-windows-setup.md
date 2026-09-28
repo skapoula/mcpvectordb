@@ -48,14 +48,15 @@ ChatGPT Desktop app via a persistent background Windows service.
    - Creates the LanceDB data directory and generates `.env`
    - Installs [servy](https://github.com/aelassas/servy) (a Windows service manager) if
      `servy-cli` is not already installed
-   - Installs and starts the `mcpvectordb-chatgpt` service (`streamable-http` on port 8000,
-     starting automatically)
+   - Installs and starts the `mcpvectordb-chatgpt` service (`streamable-http` on
+     `127.0.0.1:8000`, starting automatically), allowing your Tailscale hostname in the
+     `Host` header
    - Prints the next steps
 
 3. Expose the server over HTTPS on your tailnet:
 
    ```powershell
-   tailscale serve --bg http://localhost:8000
+   tailscale serve --bg http://127.0.0.1:8000
    ```
 
    Use your `MCP_PORT` instead of 8000 if you changed it.
@@ -73,11 +74,10 @@ ChatGPT Desktop app via a persistent background Windows service.
    ChatGPT should respond with an empty libraries list (no error). That confirms
    the server is connected.
 
-> **Security:** the service listens on all network interfaces (`0.0.0.0`) with no
-> sign-in, and runs as `SYSTEM`. Any device that can reach port 8000 can read, add and
-> delete documents, and can ask the server to ingest any file on this PC. Reach it only
-> through `tailscale serve`, and do not add a Windows Firewall rule that allows inbound
-> connections to port 8000.
+> **Security:** the service has no sign-in and runs as `SYSTEM`, so it listens on
+> `127.0.0.1` only; other devices cannot reach port 8000 directly. Anyone on your tailnet
+> who can open the `tailscale serve` URL can read, add and delete documents, and can ask
+> the server to ingest any file on this PC. Keep the tailnet to devices you trust.
 
 ---
 
@@ -186,6 +186,7 @@ is never deleted.
 | `DLL load failed` or `VCRUNTIME140.dll not found` | Install [Visual C++ Redistributable 2019+](https://aka.ms/vs/17/release/vc_redist.x64.exe)                                          |
 | "Port 8000 is already in use"                     | Set `MCP_PORT=<free port>` in `.env` and re-run setup                                                                               |
 | servy download fails                              | Run `winget install servy`, or install it from [github.com/aelassas/servy/releases](https://github.com/aelassas/servy/releases/latest), then re-run |
+| ChatGPT gets HTTP 421 `Invalid Host header`       | Install and log in to Tailscale, then re-run setup; or run it with `$env:ALLOWED_HOSTS='<your-tailscale-hostname>'` |
 | ChatGPT Desktop shows no tools                    | Verify the URL matches what the script printed; check service is running with `Get-Service mcpvectordb-chatgpt`                     |
 | Service starts but ChatGPT can't connect          | Confirm Developer mode is enabled in ChatGPT Desktop settings; try restarting ChatGPT Desktop                                       |
 | Service won't start                               | Check `%ProgramData%\mcpvectordb\chatgpt-service.log` for the error                                                                |
