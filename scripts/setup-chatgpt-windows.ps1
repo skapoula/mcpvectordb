@@ -110,12 +110,12 @@ foreach ($Dir in @($LanceDir, $ModelsDir)) {
 # looks, and the service fails to start for lack of the tokenizer.
 
 Write-Step "Downloading embedding model and tokenizer (nomic-embed-text-v1.5, ~600 MB)..."
-Write-Host "    This is a one-time download. Skip with Ctrl+C if already done." -ForegroundColor Yellow
+Write-Host "    This is a one-time download; cached files are reused on later runs." -ForegroundColor Yellow
 $env:FASTEMBED_CACHE_PATH = $ModelsDir
 $env:HF_HOME = $ModelsDir
 uv run mcpvectordb-download-model
-if ($LASTEXITCODE -ne 0) { Write-Warn "Model download failed. Re-run this script before starting the service." }
-else { Write-OK "Embedding model ready in $ModelsDir" }
+if ($LASTEXITCODE -ne 0) { Write-Fail "Model download failed. The service needs this cache to start." }
+Write-OK "Embedding model ready in $ModelsDir"
 
 # ── Step 6: Generate .env ─────────────────────────────────────────────────────
 
@@ -125,19 +125,9 @@ $EnvFile = Join-Path (Join-Path $PSScriptRoot "..") ".env"
 $EnvFile = [System.IO.Path]::GetFullPath($EnvFile)
 
 if (Test-Path $EnvFile) {
-    # Check if existing .env has the wrong transport
-    $envContent = Get-Content $EnvFile -Raw
-    if ($envContent -match "MCP_TRANSPORT=stdio") {
-        Write-Warn ".env exists with MCP_TRANSPORT=stdio — the ChatGPT service needs MCP_TRANSPORT=streamable-http."
-        Write-Warn "Edit .env and change MCP_TRANSPORT=stdio to MCP_TRANSPORT=streamable-http, then re-run this script."
-        exit 1
-    }
-    if ($envContent -match "MCP_TRANSPORT=sse") {
-        Write-Warn ".env exists with MCP_TRANSPORT=sse — ChatGPT Desktop requires MCP_TRANSPORT=streamable-http."
-        Write-Warn "Edit .env and change MCP_TRANSPORT=sse to MCP_TRANSPORT=streamable-http, then re-run this script."
-        exit 1
-    }
-    Write-Warn ".env already exists — skipping generation (delete it to regenerate)"
+    # Service variables below take precedence over .env, so an existing stdio
+    # configuration for another client can coexist with this service.
+    Write-Warn ".env already exists — keeping it. Service transport and data paths are set separately."
 } else {
     $EnvContent = @"
 # mcpvectordb — Windows 11 ChatGPT Desktop configuration
@@ -163,20 +153,27 @@ LOG_LEVEL=INFO
 # Read MCP_PORT from .env if it already exists, otherwise default to 8000
 $McpPort = 8000
 if (Test-Path $EnvFile) {
-    $envLines = Get-Content $EnvFile -ErrorAction SilentlyContinue
-    $portLine = $envLines | Where-Object { $_ -match "^MCP_PORT\s*=\s*(\d+)" }
-    if ($portLine -and $Matches[1]) { $McpPort = [int]$Matches[1] }
+    foreach ($line in (Get-Content $EnvFile)) {
+        if ($line -match '^MCP_PORT\s*=\s*(\d+)') {
+            $McpPort = [int]$Matches[1]
+        }
+    }
 }
+if ($McpPort -lt 1 -or $McpPort -gt 65535) { Write-Fail "MCP_PORT must be between 1 and 65535." }
 
 Write-Step "Checking port $McpPort..."
-$portInUse = netstat -ano | Select-String "[:.]$McpPort\s"
-if ($portInUse) {
-    Write-Warn "Port $McpPort is already in use. Set MCP_PORT to a free port in .env and re-run."
-    Write-Warn "Processes using port ${McpPort}:"
-    $portInUse | ForEach-Object { Write-Host "    $_" -ForegroundColor Yellow }
-    exit 1
+$ServiceName = "mcpvectordb-chatgpt"
+$existingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($existingService) {
+    # The existing installation may own the port. Check again after stopping it.
+    Write-OK "Existing service found; its port will be checked after it stops"
+} else {
+    $portInUse = @(Get-NetTCPConnection -LocalPort $McpPort -State Listen -ErrorAction SilentlyContinue)
+    if ($portInUse.Count -gt 0) {
+        Write-Fail "Port $McpPort is already listening. Set MCP_PORT to a free port in .env and re-run."
+    }
+    Write-OK "Port $McpPort is free"
 }
-Write-OK "Port $McpPort is free"
 
 # ── Step 8: Locate or install servy-cli (Windows service manager) ────────────
 #
@@ -208,6 +205,8 @@ if ($ServyExe) {
     $ServyVersion     = "7.8"
     $ServyInstaller   = "servy-$ServyVersion-net48-x64-installer.exe"
     $ServyInstallerUrl = "https://github.com/aelassas/servy/releases/download/v$ServyVersion/$ServyInstaller"
+    # SHA-256 from https://github.com/aelassas/servy/releases/tag/v7.8
+    $ServyInstallerSha256 = "2bbd860644d78760748dc2dd63e68e5c09d9c7c190753296b0b3fd75f87e836f"
     $ServyInstallerPath = Join-Path $env:TEMP $ServyInstaller
 
     try {
@@ -226,6 +225,13 @@ if ($ServyExe) {
         Write-Host ""
         exit 1
     }
+
+    $actualHash = (Get-FileHash -Path $ServyInstallerPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHash -ne $ServyInstallerSha256) {
+        Remove-Item $ServyInstallerPath -Force -ErrorAction SilentlyContinue
+        Write-Fail "servy installer SHA-256 mismatch; refusing to run it."
+    }
+    Write-OK "Installer SHA-256 verified"
 
     Write-Host "    Running installer silently..." -ForegroundColor Yellow
     $proc = Start-Process -FilePath $ServyInstallerPath -ArgumentList "/SILENT" -Wait -PassThru
@@ -250,7 +256,6 @@ if ($ServyExe) {
 
 Write-Step "Installing mcpvectordb-chatgpt Windows service..."
 
-$ServiceName = "mcpvectordb-chatgpt"
 $ProjectDir  = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $UvPath      = (Get-Command uv).Source
 
@@ -258,14 +263,23 @@ $UvPath      = (Get-Command uv).Source
 $existingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($existingService) {
     Write-Warn "Service '$ServiceName' already exists — removing and reinstalling..."
-    try { & $ServyExe stop  --name=$ServiceName 2>&1 | Out-Null } catch {}
-    Start-Sleep -Seconds 2
+    try { & $ServyExe stop --name=$ServiceName 2>&1 | Out-Null } catch {}
+    # Wait for the previous process to release its listener before reinstalling.
+    for ($attempt = 0; $attempt -lt 15; $attempt++) {
+        $portInUse = @(Get-NetTCPConnection -LocalPort $McpPort -State Listen -ErrorAction SilentlyContinue)
+        if ($portInUse.Count -eq 0) { break }
+        Start-Sleep -Seconds 1
+    }
+    if ($portInUse.Count -gt 0) {
+        try { & $ServyExe start --name=$ServiceName 2>&1 | Out-Null } catch {}
+        Write-Fail "Port $McpPort is still listening after stopping '$ServiceName'. Choose a free MCP_PORT."
+    }
     & $ServyExe uninstall --name=$ServiceName
     if ($LASTEXITCODE -ne 0) { Write-Fail "Failed to remove existing service '$ServiceName'. Stop it manually and re-run." }
     Write-OK "Existing service removed"
 }
 
-# Build --envVars value: semicolons as delimiters; backslashes in paths must be escaped.
+# Build --env value: semicolons as delimiters; backslashes in paths must be escaped.
 # servy-cli format: "VAR1=value1;VAR2=value2"
 # Backslashes in values must be doubled (\\) per servy-cli escaping rules.
 $LanceDirEsc  = $LanceDir  -replace '\\', '\\'
@@ -323,11 +337,18 @@ Write-Warn "The service runs as SYSTEM. On domain-joined machines verify SYSTEM 
 
 Write-Step "Starting service..."
 & $ServyExe start --name=$ServiceName
-if ($LASTEXITCODE -ne 0) {
-    Write-Warn "Service failed to start immediately. Check logs at: $LogFile"
-} else {
-    Write-OK "Service started"
+if ($LASTEXITCODE -ne 0) { Write-Fail "Service failed to start. Check logs at: $LogFile" }
+
+# The process loads the embedding model and tokenizer before binding the port.
+# Wait for that bind so setup does not claim success for a service that crashed.
+$ready = $false
+for ($attempt = 0; $attempt -lt 30; $attempt++) {
+    $listener = @(Get-NetTCPConnection -LocalAddress "127.0.0.1" -LocalPort $McpPort -State Listen -ErrorAction SilentlyContinue)
+    if ($listener.Count -gt 0) { $ready = $true; break }
+    Start-Sleep -Seconds 1
 }
+if (-not $ready) { Write-Fail "Service did not listen on 127.0.0.1:$McpPort within 30 seconds. Check logs at: $LogFile" }
+Write-OK "Service is listening on 127.0.0.1:$McpPort"
 
 # ── Step 11: Print URL and instructions ───────────────────────────────────────
 
@@ -335,7 +356,7 @@ Write-Host ""
 Write-Host "  Setup complete!" -ForegroundColor Green
 Write-Host ""
 Write-Host "  mcpvectordb is now running as a Windows service." -ForegroundColor White
-Write-Host "  It will start automatically at every login." -ForegroundColor White
+Write-Host "  It will start automatically when Windows boots." -ForegroundColor White
 Write-Host ""
 Write-Host "  The server is running on http://127.0.0.1:${McpPort}/mcp (this PC only)" -ForegroundColor White
 Write-Host ""

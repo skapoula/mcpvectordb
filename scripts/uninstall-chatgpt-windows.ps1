@@ -28,25 +28,31 @@ if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adm
 }
 Write-OK "Running as Administrator"
 
-# ── Locate servy-cli ──────────────────────────────────────────────────────────
-
-$ServyExe = Join-Path $PSScriptRoot "servy\servy-cli.exe"
-if (-not (Test-Path $ServyExe)) {
-    # Fall back to system PATH (winget/choco install puts it there)
-    $servyCmd = Get-Command servy-cli -ErrorAction SilentlyContinue
-    $ServyExe = if ($servyCmd) { $servyCmd.Source } else { $null }
-    if (-not $ServyExe) { Write-Fail "servy-cli.exe not found. Run setup-chatgpt-windows.ps1 first." }
-}
-
 # ── Stop and remove service ────────────────────────────────────────────────────
 
 $ServiceName = "mcpvectordb-chatgpt"
-
-Write-Step "Stopping service '$ServiceName'..."
 $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+
 if (-not $svc) {
     Write-Warn "Service '$ServiceName' not found — nothing to remove."
 } else {
+    # Match the locations checked by setup-chatgpt-windows.ps1. The installer
+    # may put servy-cli in Program Files without adding it to this session's PATH.
+    $servyCmd = Get-Command servy-cli -ErrorAction SilentlyContinue
+    $ServyExe = if ($servyCmd) { $servyCmd.Source } else { $null }
+    if (-not $ServyExe) {
+        $candidates = @(
+            "$env:ProgramFiles\Servy\servy-cli.exe",
+            "$env:ProgramFiles\servy\servy-cli.exe",
+            "${env:ProgramFiles(x86)}\Servy\servy-cli.exe"
+        )
+        foreach ($candidate in $candidates) {
+            if (Test-Path $candidate) { $ServyExe = $candidate; break }
+        }
+    }
+    if (-not $ServyExe) { Write-Fail "servy-cli.exe not found. Locate it before uninstalling '$ServiceName'." }
+
+    Write-Step "Stopping service '$ServiceName'..."
     try { & $ServyExe stop --name=$ServiceName 2>&1 | Out-Null } catch {}
     Start-Sleep -Seconds 2
     & $ServyExe uninstall --name=$ServiceName
@@ -56,7 +62,7 @@ if (-not $svc) {
 
 # ── Optionally delete data directories ────────────────────────────────────────
 
-$DataDir = Join-Path $env:LOCALAPPDATA "mcpvectordb"
+$DataDir = Join-Path $env:ProgramData "mcpvectordb"
 
 Write-Host ""
 $deleteData = Read-Host "Delete data directories ($DataDir)? This removes your LanceDB index and cached model. [y/N]"
