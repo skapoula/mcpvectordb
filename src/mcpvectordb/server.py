@@ -693,6 +693,11 @@ def _validate_oauth_config() -> None:
             "OAuth only applies to streamable-http."
         )
         return
+    if settings.mcp_transport != "streamable-http":
+        raise ConfigurationError(
+            f"OAUTH_ENABLED=true is not enforced with "
+            f"MCP_TRANSPORT={settings.mcp_transport}; use streamable-http"
+        )
     if not settings.oauth_client_id:
         raise ConfigurationError(
             "OAUTH_ENABLED=true requires OAUTH_CLIENT_ID to be set"

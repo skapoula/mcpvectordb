@@ -838,6 +838,19 @@ class TestValidateOAuthConfig:
             _validate_oauth_config()
 
     @pytest.mark.unit
+    def test_sse_with_oauth_raises(self, monkeypatch):
+        """OAUTH_ENABLED=true with SSE refuses to start: SSE runs without auth."""
+        import mcpvectordb.config as config_mod
+        from mcpvectordb.server import _validate_oauth_config
+
+        monkeypatch.setattr(config_mod.settings, "oauth_enabled", True)
+        monkeypatch.setattr(config_mod.settings, "mcp_transport", "sse")
+        monkeypatch.setattr(config_mod.settings, "oauth_client_id", "cid")
+
+        with pytest.raises(ConfigurationError, match="streamable-http"):
+            _validate_oauth_config()
+
+    @pytest.mark.unit
     def test_valid_oauth_config_passes(self, monkeypatch):
         """OAUTH_ENABLED=true with client_id on streamable-http passes."""
         import mcpvectordb.config as config_mod
