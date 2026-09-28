@@ -487,6 +487,24 @@ async def upload_handler(request: Request) -> JSONResponse:
         library  — library name (optional, defaults to DEFAULT_LIBRARY)
         metadata — JSON string of key-value pairs (optional)
     """
+    # max_part_size below only bounds non-file fields; file parts spool to disk
+    # unchecked, so bound the whole body by its declared length first. The
+    # HTTP server stops reading at Content-Length, so the header cannot lie.
+    try:
+        length = int(request.headers["content-length"])
+    except (KeyError, ValueError):
+        return JSONResponse(
+            {"status": "error", "error": "Content-Length header required"},
+            status_code=411,
+        )
+    if length > settings.max_upload_bytes:
+        return JSONResponse(
+            {
+                "status": "error",
+                "error": f"Upload exceeds {settings.max_upload_bytes} bytes",
+            },
+            status_code=413,
+        )
     try:
         form = await request.form(max_part_size=settings.max_upload_bytes)
     except Exception as e:

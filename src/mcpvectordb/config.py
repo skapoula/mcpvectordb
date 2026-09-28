@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     chunk_min_tokens: int = 50
 
     # Upload
-    max_upload_bytes: int = 50 * 1024 * 1024  # 50 MB; controls Starlette max_part_size
+    max_upload_bytes: int = 50 * 1024 * 1024  # 50 MB; caps the /upload request body
 
     # Security — extra allowed Host headers for DNS rebinding protection.
     # Comma-separated. Add your reverse-proxy / tunnel hostname when running behind

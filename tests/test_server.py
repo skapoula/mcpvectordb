@@ -1101,6 +1101,28 @@ class TestUploadEndpoint:
         assert "doc_id" in body
 
     @pytest.mark.unit
+    def test_upload_over_limit_returns_413(self, monkeypatch, upload_client):
+        """A file larger than MAX_UPLOAD_BYTES is refused before it is parsed."""
+        monkeypatch.setattr(settings, "max_upload_bytes", 1024)
+        response = upload_client.post(
+            "/upload",
+            files={"file": ("big.txt", b"x" * 4096, "text/plain")},
+        )
+        assert response.status_code == 413
+
+    @pytest.mark.unit
+    def test_upload_without_content_length_returns_411(self, upload_client):
+        """A chunked body has no declared size to check, so it is refused."""
+        body = b'--b\r\nContent-Disposition: form-data; name="file"; '
+        body += b'filename="a.txt"\r\n\r\nhi\r\n--b--\r\n'
+        response = upload_client.post(
+            "/upload",
+            content=iter([body]),
+            headers={"Content-Type": "multipart/form-data; boundary=b"},
+        )
+        assert response.status_code == 411
+
+    @pytest.mark.unit
     def test_upload_missing_file_field_returns_400(self, upload_client):
         """POST with no file field returns 400 with 'Missing' in the error message."""
         response = upload_client.post("/upload", data={"library": "default"})
