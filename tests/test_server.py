@@ -638,6 +638,50 @@ class TestGetDocumentTool:
         assert result["chunk_count"] == 1
         assert result["metadata"] == {"author": "Test"}
 
+    @pytest.mark.integration
+    def test_get_document_does_not_repeat_chunk_overlap(self, _use_tmp_store):
+        """Text shared by neighbouring chunks appears once in the content."""
+        import uuid
+        from datetime import UTC, datetime
+
+        from mcpvectordb import server
+        from mcpvectordb.store import ChunkRecord
+
+        doc_id = str(uuid.uuid4())
+        texts = [
+            "First sentence here. The overlapping middle sentence.",
+            "The overlapping middle sentence. Last sentence here.",
+        ]
+        _use_tmp_store.upsert_chunks(
+            [
+                ChunkRecord(
+                    id=str(uuid.uuid4()),
+                    doc_id=doc_id,
+                    library="default",
+                    source="notes.md",
+                    content_hash="h",
+                    title="Notes",
+                    content=text,
+                    embedding=[0.1] * settings.embedding_dimension,
+                    chunk_index=i,
+                    created_at=datetime.now(UTC).isoformat(),
+                    metadata="{}",
+                    file_type="md",
+                    last_modified="",
+                    page=0,
+                    overlap=len("The overlapping middle sentence.") if i else 0,
+                )
+                for i, text in enumerate(texts)
+            ]
+        )
+
+        result = run(server.get_document(doc_id=doc_id))
+
+        assert result["content"] == (
+            "First sentence here. The overlapping middle sentence. Last sentence here."
+        )
+        assert result["chunk_count"] == 2
+
     @pytest.mark.unit
     def test_get_document_store_error_returns_error(self, monkeypatch):
         """StoreError from get_document returns a structured error dict."""
@@ -835,6 +879,19 @@ class TestValidateOAuthConfig:
         monkeypatch.setattr(config_mod.settings, "oauth_client_id", None)
 
         with pytest.raises(ConfigurationError, match="OAUTH_CLIENT_ID"):
+            _validate_oauth_config()
+
+    @pytest.mark.unit
+    def test_sse_with_oauth_raises(self, monkeypatch):
+        """OAUTH_ENABLED=true with SSE refuses to start: SSE runs without auth."""
+        import mcpvectordb.config as config_mod
+        from mcpvectordb.server import _validate_oauth_config
+
+        monkeypatch.setattr(config_mod.settings, "oauth_enabled", True)
+        monkeypatch.setattr(config_mod.settings, "mcp_transport", "sse")
+        monkeypatch.setattr(config_mod.settings, "oauth_client_id", "cid")
+
+        with pytest.raises(ConfigurationError, match="streamable-http"):
             _validate_oauth_config()
 
     @pytest.mark.unit
@@ -1052,6 +1109,12 @@ class TestMainFunction:
         mock_run.assert_called_once_with(transport="sse")
 
 
+def _multipart(data: bytes) -> bytes:
+    """Encode *data* as the 'file' part of a multipart body with boundary 'b'."""
+    head = b'--b\r\nContent-Disposition: form-data; name="file"; filename="a.txt"'
+    return head + b"\r\n\r\n" + data + b"\r\n--b--\r\n"
+
+
 @pytest.fixture
 def upload_client(monkeypatch):
     """TestClient with _ingest_content and _convert patched for /upload tests."""
@@ -1086,6 +1149,60 @@ class TestUploadEndpoint:
         body = response.json()
         assert body["status"] == "indexed"
         assert "doc_id" in body
+
+    @pytest.mark.unit
+    def test_upload_over_limit_returns_413(self, monkeypatch, upload_client):
+        """A file larger than MAX_UPLOAD_BYTES is refused before it is parsed."""
+        monkeypatch.setattr(settings, "max_upload_bytes", 1024)
+        response = upload_client.post(
+            "/upload",
+            files={"file": ("big.txt", b"x" * 4096, "text/plain")},
+        )
+        assert response.status_code == 413
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(("size", "status"), [(100, 200), (4096, 413)])
+    def test_upload_chunked_body_is_capped(
+        self, monkeypatch, upload_client, size, status
+    ):
+        """A chunked body has no declared size; its bytes are counted instead."""
+        monkeypatch.setattr(settings, "max_upload_bytes", 1024)
+        response = upload_client.post(
+            "/upload",
+            content=iter([_multipart(b"x" * size)]),
+            headers={"Content-Type": "multipart/form-data; boundary=b"},
+        )
+        assert response.status_code == status
+
+    @pytest.mark.unit
+    def test_upload_cap_ignores_understated_content_length(
+        self, monkeypatch, upload_client
+    ):
+        """A Content-Length smaller than the body does not get past the limit."""
+        from starlette.requests import Request
+
+        from mcpvectordb import server
+
+        monkeypatch.setattr(settings, "max_upload_bytes", 1024)
+        body = _multipart(b"x" * 4096)
+        pieces = [body[i : i + 512] for i in range(0, len(body), 512)]
+
+        async def receive():
+            chunk = pieces.pop(0)
+            return {"type": "http.request", "body": chunk, "more_body": bool(pieces)}
+
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/upload",
+            "query_string": b"",
+            "headers": [
+                (b"content-type", b"multipart/form-data; boundary=b"),
+                (b"content-length", b"1"),
+            ],
+        }
+        response = run(server.upload_handler(Request(scope, receive)))
+        assert response.status_code == 413
 
     @pytest.mark.unit
     def test_upload_missing_file_field_returns_400(self, upload_client):

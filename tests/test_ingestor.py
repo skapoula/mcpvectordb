@@ -18,9 +18,12 @@ def run(coro):
 @pytest.fixture
 def _patch_chunker(monkeypatch):
     """Patch chunker.chunk to return three synthetic chunks without tokenizing."""
+    from mcpvectordb.chunker import Chunk
+
+    texts = ["chunk one", "chunk two", "chunk three"]
     monkeypatch.setattr(
-        "mcpvectordb.ingestor.chunk",
-        lambda text: ["chunk one", "chunk two", "chunk three"] if text.strip() else [],
+        "mcpvectordb.ingestor.chunk_with_overlap",
+        lambda text: [Chunk(text=t) for t in texts] if text.strip() else [],
     )
 
 
@@ -331,6 +334,40 @@ class TestIngestURLPrivateAddressGuard:
             run(ingest("https://example.com/r", "web", None, store))
 
     @pytest.mark.integration
+    def test_dns_rebinding_blocked(
+        self, store, mock_embedder, _network_transport, monkeypatch
+    ):
+        """A host that turns private after the first lookup is never connected to."""
+        import socket
+
+        answers = iter(["93.184.216.34"])
+
+        def _rebinding(host, *args, **kwargs):
+            ip = next(answers, "127.0.0.1")
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))]
+
+        monkeypatch.setattr(socket, "getaddrinfo", _rebinding)
+        with pytest.raises(IngestionError, match="non-public address"):
+            run(ingest("http://rebind.test:9/", "web", None, store))
+
+    @pytest.mark.unit
+    def test_pinned_backend_connects_to_checked_address(self, _resolve, monkeypatch):
+        """The socket opens to the IP that passed the check, not a fresh lookup."""
+        from mcpvectordb.ingestor import _PinnedBackend
+
+        _resolve["example.com"] = "93.184.216.34"
+        backend = _PinnedBackend()
+        hosts = []
+
+        async def _connect(host, port, *args, **kwargs):
+            hosts.append(host)
+            return "stream"
+
+        monkeypatch.setattr(backend._inner, "connect_tcp", _connect)
+        assert run(backend.connect_tcp("example.com", 443)) == "stream"
+        assert hosts == ["93.184.216.34"]
+
+    @pytest.mark.integration
     def test_stdio_allows_private_address(
         self, store, mock_embedder, _patch_chunker, _resolve, httpx_mock, monkeypatch
     ):
@@ -366,8 +403,107 @@ class TestIngestURLPrivateAddressGuard:
         )
 
 
+class TestIngestOverlap:
+    """Each stored chunk records how much of the previous chunk it repeats."""
+
+    @pytest.mark.integration
+    def test_chunk_overlap_is_stored(self, store, mock_embedder, monkeypatch):
+        """The overlap the chunker reports is written to each record."""
+        from mcpvectordb.chunker import Chunk
+        from mcpvectordb.ingestor import ingest_content
+
+        monkeypatch.setattr(
+            "mcpvectordb.ingestor.chunk_with_overlap",
+            lambda text: [Chunk(text="a b c"), Chunk(text="b c d", overlap=3)],
+        )
+        result = run(ingest_content("a b c d", "notes.md", "default", None, store))
+        assert [r.overlap for r in store.get_document(result.doc_id)] == [0, 3]
+
+    @pytest.mark.integration
+    def test_repetitive_document_rebuilds_exactly(self, store, mock_embedder):
+        """Real chunker, store and join: 1,200 repeated words come back intact."""
+        from mcpvectordb.chunker import Chunk, join_chunks
+        from mcpvectordb.ingestor import ingest_content
+
+        text = " ".join(["word"] * 1200)
+        result = run(ingest_content(text, "words.md", "default", None, store))
+        records = store.get_document(result.doc_id)
+        assert len(records) > 1
+        rebuilt = join_chunks(
+            [Chunk(text=r.content, overlap=r.overlap) for r in records]
+        )
+        assert rebuilt == text
+
+
 class TestIngestDedup:
     """Deduplication scenarios — all three cases."""
+
+    @pytest.mark.integration
+    def test_ingest_waits_for_lock_held_by_another_process(
+        self, store, mock_embedder, _patch_chunker
+    ):
+        """A second process ingesting the same source blocks this one until done."""
+        from filelock import FileLock
+
+        from mcpvectordb.ingestor import ingest_content
+
+        def _ingest():
+            return ingest_content("v1", "notes.md", "default", None, store)
+
+        async def _attempt():
+            return await asyncio.wait_for(_ingest(), timeout=0.5)
+
+        # A separate FileLock instance takes its own OS lock, as a CLI run would.
+        other = FileLock(store.source_lock_path("notes.md", "default"))
+        other.acquire()
+        try:
+            with pytest.raises(TimeoutError):
+                run(_attempt())
+        finally:
+            other.release()
+        assert run(_attempt()).status == "indexed"
+
+    @pytest.mark.integration
+    def test_concurrent_ingests_of_one_source_leave_one_document(
+        self, store, mock_embedder, _patch_chunker
+    ):
+        """Racing ingests of the same source must not both survive in the index."""
+        from mcpvectordb.ingestor import ingest_content
+
+        async def _race():
+            return await asyncio.gather(
+                ingest_content("version one", "notes.md", "default", None, store),
+                ingest_content("version two", "notes.md", "default", None, store),
+            )
+
+        # Create the table first so only the dedup race is exercised.
+        run(ingest_content("other", "other.md", "other", None, store))
+        results = run(_race())
+        docs = store.list_documents(library="default", limit=10, offset=0)
+        assert len(docs) == 1
+        assert sorted(r.status for r in results) == ["indexed", "replaced"]
+
+    @pytest.mark.integration
+    def test_concurrent_identical_ingests_index_once(
+        self, store, mock_embedder, _patch_chunker
+    ):
+        """Racing ingests of one source with the same content: one indexes."""
+        from mcpvectordb.ingestor import ingest_content
+
+        async def _race():
+            return await asyncio.gather(
+                *(
+                    ingest_content("same text", "notes.md", "default", None, store)
+                    for _ in range(3)
+                )
+            )
+
+        # Create the table first so only the dedup race is exercised.
+        run(ingest_content("other", "other.md", "other", None, store))
+        results = run(_race())
+        docs = store.list_documents(library="default", limit=10, offset=0)
+        assert len(docs) == 1
+        assert sorted(r.status for r in results) == ["indexed", "skipped", "skipped"]
 
     @pytest.mark.integration
     def test_dedup_same_hash_returns_skipped(
@@ -468,7 +604,7 @@ class TestIngestFileErrorPaths:
         def _bad_chunk(_text):
             raise RuntimeError("tokenizer crash")
 
-        monkeypatch.setattr("mcpvectordb.ingestor.chunk", _bad_chunk)
+        monkeypatch.setattr("mcpvectordb.ingestor.chunk_with_overlap", _bad_chunk)
 
         with pytest.raises(IngestionError, match="Chunking failed"):
             run(ingest(source=f, library="default", metadata=None, store=store))
@@ -481,7 +617,7 @@ class TestIngestFileErrorPaths:
         f = tmp_path / "doc.pdf"
         f.write_bytes(b"%PDF content")
 
-        monkeypatch.setattr("mcpvectordb.ingestor.chunk", lambda _text: [])
+        monkeypatch.setattr("mcpvectordb.ingestor.chunk_with_overlap", lambda _text: [])
 
         with pytest.raises(IngestionError, match="No usable chunks"):
             run(ingest(source=f, library="default", metadata=None, store=store))

@@ -13,8 +13,9 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.types import Receive, Scope, Send
+from starlette.types import Message, Receive, Scope, Send
 
+from mcpvectordb.chunker import Chunk, join_chunks
 from mcpvectordb.config import settings
 from mcpvectordb.converter import convert as _convert
 from mcpvectordb.embedder import get_embedder
@@ -371,9 +372,10 @@ async def delete_document(doc_id: str) -> dict:
 # ── Tool: get_document ────────────────────────────────────────────────────────
 @mcp.tool()
 async def get_document(doc_id: str) -> dict:
-    """Return the full Markdown text of an indexed document.
+    """Return the Markdown text of an indexed document, rebuilt from its chunks.
 
-    Concatenates all chunks in order to reconstruct the document text.
+    Joins the chunks in order, dropping the overlap each chunk recorded at
+    ingest. Documents indexed before overlap was recorded repeat it instead.
 
     Args:
         doc_id: The document UUID to retrieve.
@@ -388,7 +390,9 @@ async def get_document(doc_id: str) -> dict:
         if not records:
             return {"error": f"Document not found: {doc_id}", "status": "error"}
         first = records[0]
-        full_text = "\n\n".join(r.content for r in records)
+        full_text = join_chunks(
+            [Chunk(text=r.content, overlap=r.overlap) for r in records]
+        )
         return {
             "doc_id": doc_id,
             "source": first.source,
@@ -478,6 +482,10 @@ async def server_info(check_path: str | None = None) -> dict:
 
 
 # ── HTTP upload endpoint ───────────────────────────────────────────────────────
+class _UploadTooLargeError(Exception):
+    """Raised mid-stream when an upload body passes MAX_UPLOAD_BYTES."""
+
+
 @mcp.custom_route("/upload", methods=["POST"])
 async def upload_handler(request: Request) -> JSONResponse:
     """Accept multipart file upload and run the full ingest pipeline on the server.
@@ -487,8 +495,27 @@ async def upload_handler(request: Request) -> JSONResponse:
         library  — library name (optional, defaults to DEFAULT_LIBRARY)
         metadata — JSON string of key-value pairs (optional)
     """
+    # max_part_size only bounds non-file fields; file parts spool to disk
+    # unchecked. Count body bytes as they arrive and stop at the limit, so
+    # neither a missing nor an understated Content-Length gets past it.
+    limit = settings.max_upload_bytes
+    received = 0
+
+    async def _capped_receive() -> Message:
+        nonlocal received
+        message = await request.receive()
+        received += len(message.get("body", b""))
+        if received > limit:
+            raise _UploadTooLargeError
+        return message
+
     try:
-        form = await request.form(max_part_size=settings.max_upload_bytes)
+        form = await Request(request.scope, _capped_receive).form(max_part_size=limit)
+    except _UploadTooLargeError:
+        return JSONResponse(
+            {"status": "error", "error": f"Upload exceeds {limit} bytes"},
+            status_code=413,
+        )
     except Exception as e:
         return JSONResponse(
             {"status": "error", "error": f"Form parse failed: {e}"}, status_code=400
@@ -693,6 +720,11 @@ def _validate_oauth_config() -> None:
             "OAuth only applies to streamable-http."
         )
         return
+    if settings.mcp_transport != "streamable-http":
+        raise ConfigurationError(
+            f"OAUTH_ENABLED=true is not enforced with "
+            f"MCP_TRANSPORT={settings.mcp_transport}; use streamable-http"
+        )
     if not settings.oauth_client_id:
         raise ConfigurationError(
             "OAUTH_ENABLED=true requires OAUTH_CLIENT_ID to be set"

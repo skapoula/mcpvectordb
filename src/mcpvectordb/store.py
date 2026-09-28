@@ -1,5 +1,6 @@
 """LanceDB read/write operations and ChunkRecord schema."""
 
+import hashlib
 import json
 import logging
 import re
@@ -38,6 +39,9 @@ class ChunkRecord(BaseModel):
     file_type: str  # e.g. "pdf", "docx", "html", "url"; "unknown" if undetectable
     last_modified: str  # ISO 8601 from file mtime or HTTP Last-Modified; "" if unknown
     page: int  # 1-indexed page number; 0 = unknown or not applicable
+    # Leading characters of content repeated from the previous chunk; 0 for
+    # rows indexed before this column existed, which then rejoin with a gap.
+    overlap: int = 0
 
 
 def _lance_schema() -> pa.Schema:
@@ -64,6 +68,7 @@ def _lance_schema() -> pa.Schema:
             pa.field("file_type", pa.string()),
             pa.field("last_modified", pa.string()),
             pa.field("page", pa.int64()),
+            pa.field("overlap", pa.int64()),
         ]
     )
 
@@ -96,7 +101,8 @@ def _open_table(uri: str, table_name: str) -> lancedb.table.Table:
             _migrate_table(table)
         else:
             # Create table with an explicit PyArrow schema — no dummy record needed.
-            table = db.create_table(table_name, schema=_lance_schema())
+            # exist_ok: a concurrent writer may create it between list and create.
+            table = db.create_table(table_name, schema=_lance_schema(), exist_ok=True)
         return table
     except StoreError:
         raise
@@ -186,6 +192,8 @@ def _migrate_table(table: lancedb.table.Table) -> None:
         to_add["last_modified"] = "''"
     if "page" not in existing:
         to_add["page"] = "CAST(0 AS INT)"
+    if "overlap" not in existing:
+        to_add["overlap"] = "CAST(0 AS BIGINT)"
     if not to_add:
         return
     try:
@@ -263,6 +271,22 @@ class Store:
             _ensure_scalar_indexes(table)
             self._indexes_created = True
         return table
+
+    def source_lock_path(self, source: str, library: str) -> Path | None:
+        """Return the lock file guarding ingests of one (source, library).
+
+        Every process sharing this database locks the same file, so a CLI run
+        and a server cannot both replace one document. Returns None for s3://
+        URIs, which have no shared local directory to lock in.
+        """
+        if self._uri.startswith("s3://"):
+            return None
+        key = hashlib.sha256(f"{library}\0{source}".encode()).hexdigest()[:32]
+        lock_dir = Path(self._uri).expanduser() / ".ingest-locks"
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        # ponytail: one empty file per source ever ingested, never pruned —
+        # unlinking a lock file races with waiters on it.
+        return lock_dir / f"{key}.lock"
 
     def upsert_chunks(self, chunks: list[ChunkRecord]) -> None:
         """Write a list of chunk records to the store.

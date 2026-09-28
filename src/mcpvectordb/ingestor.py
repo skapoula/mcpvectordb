@@ -7,13 +7,17 @@ import json
 import logging
 import socket
 import uuid
+from collections.abc import AsyncIterator, Iterable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httpcore
 import httpx
+from filelock import FileLock, Timeout
 from pydantic import BaseModel
 
-from mcpvectordb.chunker import chunk
+from mcpvectordb.chunker import Chunk, chunk_with_overlap
 from mcpvectordb.config import settings
 from mcpvectordb.converter import SUPPORTED_EXTENSIONS, convert
 from mcpvectordb.embedder import get_embedder
@@ -188,41 +192,42 @@ async def ingest(
         except OSError:
             last_modified = ""
 
-    # ── 2. Dedup check (before the expensive conversion) ───────────────────────
-    new_hash = hashlib.sha256(raw_bytes).hexdigest()
-    skipped, existing_doc_id = await _dedup(store, source_str, library, new_hash)
-    if skipped:
-        return skipped
+    async with _source_lock(store, source_str, library):
+        # ── 2. Dedup check (before the expensive conversion) ───────────────────────
+        new_hash = hashlib.sha256(raw_bytes).hexdigest()
+        skipped, existing_doc_id = await _dedup(store, source_str, library, new_hash)
+        if skipped:
+            return skipped
 
-    # ── 3. Convert to Markdown ─────────────────────────────────────────────────
-    if is_url:
-        text = await _convert_html_bytes(raw_bytes, source_str)
-    else:
-        try:
-            text = await asyncio.to_thread(convert, path)
-        except UnsupportedFormatError:
-            raise
-        except Exception as e:
-            raise IngestionError(f"Conversion failed for {source_str!r}") from e
+        # ── 3. Convert to Markdown ─────────────────────────────────────────────────
+        if is_url:
+            text = await _convert_html_bytes(raw_bytes, source_str)
+        else:
+            try:
+                text = await asyncio.to_thread(convert, path)
+            except UnsupportedFormatError:
+                raise
+            except Exception as e:
+                raise IngestionError(f"Conversion failed for {source_str!r}") from e
 
-    if not text.strip():
-        raise IngestionError(
-            f"No text could be extracted from {source_str!r}. "
-            "The file may be scanned/image-based, password-protected, or empty. "
-            "Try ingest_content to pass the text directly."
+        if not text.strip():
+            raise IngestionError(
+                f"No text could be extracted from {source_str!r}. "
+                "The file may be scanned/image-based, password-protected, or empty. "
+                "Try ingest_content to pass the text directly."
+            )
+
+        return await _index_text(
+            text=text,
+            source_str=source_str,
+            library=library,
+            metadata=metadata,
+            content_hash=new_hash,
+            existing_doc_id=existing_doc_id,
+            file_type=file_type,
+            last_modified=last_modified,
+            store=store,
         )
-
-    return await _index_text(
-        text=text,
-        source_str=source_str,
-        library=library,
-        metadata=metadata,
-        content_hash=new_hash,
-        existing_doc_id=existing_doc_id,
-        file_type=file_type,
-        last_modified=last_modified,
-        store=store,
-    )
 
 
 async def ingest_content(
@@ -252,29 +257,75 @@ async def ingest_content(
         IngestionError: If chunking, embedding, or storing fails.
     """
     source_str = source.strip() or "uploaded-content"
-    new_hash = hashlib.sha256(content.encode()).hexdigest()
-    skipped, existing_doc_id = await _dedup(store, source_str, library, new_hash)
-    if skipped:
-        return skipped
+    async with _source_lock(store, source_str, library):
+        new_hash = hashlib.sha256(content.encode()).hexdigest()
+        skipped, existing_doc_id = await _dedup(store, source_str, library, new_hash)
+        if skipped:
+            return skipped
 
-    if not content.strip():
-        raise IngestionError(
-            f"No text content provided for {source_str!r}. "
-            "Pass non-empty Markdown or plain text."
+        if not content.strip():
+            raise IngestionError(
+                f"No text content provided for {source_str!r}. "
+                "Pass non-empty Markdown or plain text."
+            )
+
+        raw_ext = source_str.rsplit(".", 1)[-1].lower() if "." in source_str else ""
+        return await _index_text(
+            text=content,
+            source_str=source_str,
+            library=library,
+            metadata=metadata,
+            content_hash=new_hash,
+            existing_doc_id=existing_doc_id,
+            file_type=raw_ext if f".{raw_ext}" in SUPPORTED_EXTENSIONS else "text",
+            last_modified=datetime.now(UTC).isoformat(),
+            store=store,
         )
 
-    raw_ext = source_str.rsplit(".", 1)[-1].lower() if "." in source_str else ""
-    return await _index_text(
-        text=content,
-        source_str=source_str,
-        library=library,
-        metadata=metadata,
-        content_hash=new_hash,
-        existing_doc_id=existing_doc_id,
-        file_type=raw_ext if f".{raw_ext}" in SUPPORTED_EXTENSIONS else "text",
-        last_modified=datetime.now(UTC).isoformat(),
-        store=store,
-    )
+
+_LOCK_POLL_SECONDS = 0.05
+
+# (source, library) -> (lock, number of callers holding or awaiting it)
+_source_locks: dict[tuple[str, str], tuple[asyncio.Lock, int]] = {}
+
+
+@asynccontextmanager
+async def _source_lock(
+    store: Store, source_str: str, library: str
+) -> AsyncIterator[None]:
+    """Serialise ingests of one (source, library) so dedup-then-replace is atomic.
+
+    An asyncio lock orders tasks in this process; a lock file next to the
+    database orders processes (a second server, a mcpvectordb-ingest run).
+    """
+    key = (source_str, library)
+    lock, users = _source_locks.get(key, (asyncio.Lock(), 0))
+    _source_locks[key] = (lock, users + 1)
+    try:
+        async with lock:
+            path = store.source_lock_path(source_str, library)
+            if path is None:  # s3:// — no shared directory to lock in
+                yield
+                return
+            file_lock = FileLock(path)
+            # Poll rather than block a worker thread: a cancelled wait then
+            # never leaves an orphaned thread that later takes the lock.
+            while True:
+                try:
+                    file_lock.acquire(blocking=False)
+                    break
+                except Timeout:
+                    await asyncio.sleep(_LOCK_POLL_SECONDS)
+            try:
+                yield
+            finally:
+                file_lock.release()
+    finally:
+        lock, users = _source_locks[key]
+        if users == 1:
+            del _source_locks[key]
+        else:
+            _source_locks[key] = (lock, users - 1)
 
 
 async def _dedup(
@@ -318,11 +369,11 @@ async def _index_text(
     parts = text.split("\x0c")
     paged = len(parts) > 1 or file_type == "pdf"
     pages = list(enumerate(parts, start=1)) if paged else [(0, text)]
-    chunks: list[str] = []
+    chunks: list[Chunk] = []
     chunk_pages: list[int] = []
     try:
         for page_no, page_text in pages:
-            page_chunks = await asyncio.to_thread(chunk, page_text)
+            page_chunks = await asyncio.to_thread(chunk_with_overlap, page_text)
             chunks += page_chunks
             chunk_pages += [page_no] * len(page_chunks)
     except Exception as e:
@@ -331,7 +382,9 @@ async def _index_text(
         raise IngestionError(f"No usable chunks produced from {source_str!r}")
 
     try:
-        embeddings = await asyncio.to_thread(get_embedder().embed_documents, chunks)
+        embeddings = await asyncio.to_thread(
+            get_embedder().embed_documents, [c.text for c in chunks]
+        )
     except Exception as e:
         raise IngestionError(f"Embedding failed for {source_str!r}") from e
 
@@ -346,7 +399,7 @@ async def _index_text(
             source=source_str,
             content_hash=content_hash,
             title=title,
-            content=chunk_text,
+            content=c.text,
             embedding=embeddings[i].tolist(),
             chunk_index=i,
             created_at=now,
@@ -354,8 +407,9 @@ async def _index_text(
             file_type=file_type,
             last_modified=last_modified,
             page=chunk_pages[i],
+            overlap=c.overlap,
         )
-        for i, chunk_text in enumerate(chunks)
+        for i, c in enumerate(chunks)
     ]
     try:
         await asyncio.to_thread(store.upsert_chunks, records)
@@ -399,35 +453,79 @@ async def _index_text(
     )
 
 
-def _check_public_host(url: str) -> None:
-    """Raise IngestionError if *url*'s host resolves to a non-public address.
+def _public_addresses(host: str, url: str) -> list[str]:
+    """Resolve *host* and return its addresses if every one is globally routable.
 
     Args:
-        url: Absolute http(s) URL about to be requested.
+        host: Hostname or IP literal to resolve.
+        url: The URL being fetched, for the error message.
+
+    Returns:
+        The resolved IP addresses, in resolver order.
 
     Raises:
         IngestionError: If the host cannot be resolved or any of its addresses
             is private, loopback, link-local, or otherwise not globally routable.
     """
-    host = httpx.URL(url).host
     try:
         infos = socket.getaddrinfo(host, None)
     except OSError as e:
         raise IngestionError(f"Cannot resolve host {host!r}") from e
-    for info in infos:
-        ip = ipaddress.ip_address(str(info[4][0]).split("%")[0])
-        if not ip.is_global:
+    addresses = [str(info[4][0]).split("%")[0] for info in infos]
+    for addr in addresses:
+        if not ipaddress.ip_address(addr).is_global:
             raise IngestionError(
                 f"Refusing to fetch {url!r}: {host!r} resolves to non-public address "
-                f"{ip}. Set ALLOW_PRIVATE_URLS=true to allow internal URLs."
+                f"{addr}. Set ALLOW_PRIVATE_URLS=true to allow internal URLs."
             )
+    return addresses
 
 
 async def _guard_request(request: httpx.Request) -> None:
-    """httpx request hook: apply the public-address check to every hop."""
-    # ponytail: check-then-connect leaves a DNS-rebinding window; pin the
-    # resolved IP in a custom transport if that threat matters.
-    await asyncio.to_thread(_check_public_host, str(request.url))
+    """httpx request hook: fail fast on a non-public host before any connection."""
+    url = str(request.url)
+    await asyncio.to_thread(_public_addresses, request.url.host, url)
+
+
+class _PinnedBackend(httpcore.AsyncNetworkBackend):
+    """Network backend that connects only to an address that passed the check.
+
+    Resolving once and dialling that IP closes the DNS-rebinding window a
+    check-then-connect guard leaves. TLS SNI and certificate checks still use
+    the original hostname, which httpcore passes to start_tls separately.
+    """
+
+    def __init__(self) -> None:
+        self._inner = httpcore.AnyIOBackend()
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Iterable[httpcore.SOCKET_OPTION] | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        """Resolve and check *host*, then connect to the first checked address."""
+        url = f"{host}:{port}"
+        addresses = await asyncio.to_thread(_public_addresses, host, url)
+        return await self._inner.connect_tcp(
+            addresses[0], port, timeout, local_address, socket_options
+        )
+
+    async def sleep(self, seconds: float) -> None:
+        """Delegate to the default backend."""
+        await self._inner.sleep(seconds)
+
+
+def _guarded_transport() -> httpx.AsyncHTTPTransport:
+    """Return an httpx transport whose connections go through _PinnedBackend."""
+    transport = httpx.AsyncHTTPTransport()
+    # ponytail: httpx exposes no network_backend option; this sets httpcore's
+    # pool attribute directly. Re-check on httpx/httpcore upgrades (the
+    # DNS-rebinding test fails if it stops taking effect).
+    transport._pool._network_backend = _PinnedBackend()
+    return transport
 
 
 async def _fetch_url(url: str) -> tuple[bytes, str]:
@@ -449,6 +547,9 @@ async def _fetch_url(url: str) -> tuple[bytes, str]:
             headers={"User-Agent": settings.http_user_agent},
             follow_redirects=True,
             event_hooks={"request": [_guard_request]} if guarded else {},
+            # A custom transport also disables env proxies, which would resolve
+            # the target themselves and bypass the pin.
+            transport=_guarded_transport() if guarded else None,
         ) as client:
             response = await client.get(url)
             response.raise_for_status()
