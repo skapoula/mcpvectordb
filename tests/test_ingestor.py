@@ -484,6 +484,28 @@ class TestIngestDedup:
         assert sorted(r.status for r in results) == ["indexed", "replaced"]
 
     @pytest.mark.integration
+    def test_concurrent_identical_ingests_index_once(
+        self, store, mock_embedder, _patch_chunker
+    ):
+        """Racing ingests of one source with the same content: one indexes."""
+        from mcpvectordb.ingestor import ingest_content
+
+        async def _race():
+            return await asyncio.gather(
+                *(
+                    ingest_content("same text", "notes.md", "default", None, store)
+                    for _ in range(3)
+                )
+            )
+
+        # Create the table first so only the dedup race is exercised.
+        run(ingest_content("other", "other.md", "other", None, store))
+        results = run(_race())
+        docs = store.list_documents(library="default", limit=10, offset=0)
+        assert len(docs) == 1
+        assert sorted(r.status for r in results) == ["indexed", "skipped", "skipped"]
+
+    @pytest.mark.integration
     def test_dedup_same_hash_returns_skipped(
         self, tmp_path, store, mock_embedder, _patch_chunker, _patch_converter
     ):
