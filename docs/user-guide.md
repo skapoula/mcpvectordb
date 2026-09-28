@@ -55,7 +55,7 @@ See [installation.md](./installation.md).
 
 | Symptom | Fix |
 |---|---|
-| File format not accepted | Check the supported formats: PDF, DOCX, PPTX, XLSX, HTML, TXT, MD, CSV, JSON, XML, images, audio, ZIP |
+| File format not accepted | Check the supported formats: PDF, DOCX, PPTX, XLSX, XLS, HTML, TXT, MD, CSV, JSON, XML, ZIP. Images, audio, DOC and PPT are not supported |
 | Search returns empty results | Confirm the document was ingested — use `list_documents` to verify |
 | Claude Desktop shows no tools | Restart Claude Desktop after editing the config JSON |
 | Results look wrong after a config change | If `EMBEDDING_MODEL` was changed, all documents must be re-indexed |

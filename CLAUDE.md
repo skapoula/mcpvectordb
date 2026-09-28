@@ -38,7 +38,9 @@ MCP Server
 
 **Supported input formats (via `markitdown[all]`):**
 PDF · Word (.docx) · PowerPoint (.pptx) · Excel (.xlsx) · HTML / web pages ·
-Images (OCR) · Audio (transcription) · and any other format MarkItDown supports.
+Text (.txt · .md · .csv · .json · .xml) · ZIP of those. Not supported: images (no OCR), audio (MarkItDown transcribes via
+Google's cloud speech API), legacy `.doc`/`.ppt` — `converter._NO_TEXT_FORMATS` refuses them
+with a reason.
 
 Install with:
 ```bash
@@ -300,7 +302,7 @@ LOG_FILE=~/.mcpvectordb/server.log # optional; unset = stderr only
 Never silently ignore an unsupported format. A loud failure is always preferable to
 empty or wrong content being indexed.
 
-Audio transcription and image OCR are slow — tag those tests `@pytest.mark.slow`.
+Formats that yield no usable text are listed in `_NO_TEXT_FORMATS` and refused before MarkItDown runs.
 
 ---
 
