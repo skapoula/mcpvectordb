@@ -172,3 +172,30 @@ class TestChunkTextFidelity:
         assert len(result) > 2
         for prev, nxt in zip(result, result[1:], strict=False):
             assert nxt[:40] in prev
+
+
+class TestJoinChunks:
+    """join_chunks reassembles a document from its overlapping chunks."""
+
+    @pytest.mark.unit
+    def test_round_trip_removes_overlap(self):
+        """Joining the chunks of a document reproduces the document exactly."""
+        from mcpvectordb.chunker import chunk, join_chunks
+
+        paras = [
+            f"Paragraph {i}. " + " ".join(f"word{i}x{j}" for j in range(60))
+            for i in range(30)
+        ]
+        text = "\n\n".join(paras)
+        result = chunk(text)
+        assert len(result) > 2
+        assert join_chunks(result) == text
+
+    @pytest.mark.unit
+    def test_chunks_without_overlap_are_separated_by_blank_line(self):
+        """Neighbours that share no text are joined with a paragraph break."""
+        from mcpvectordb.chunker import join_chunks
+
+        assert join_chunks(["Page one text.", "Page two text."]) == (
+            "Page one text.\n\nPage two text."
+        )

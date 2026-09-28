@@ -15,6 +15,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
+from mcpvectordb.chunker import join_chunks
 from mcpvectordb.config import settings
 from mcpvectordb.converter import convert as _convert
 from mcpvectordb.embedder import get_embedder
@@ -371,9 +372,10 @@ async def delete_document(doc_id: str) -> dict:
 # ── Tool: get_document ────────────────────────────────────────────────────────
 @mcp.tool()
 async def get_document(doc_id: str) -> dict:
-    """Return the full Markdown text of an indexed document.
+    """Return the Markdown text of an indexed document, rebuilt from its chunks.
 
-    Concatenates all chunks in order to reconstruct the document text.
+    Joins the chunks in order and drops the text neighbouring chunks share.
+    Whitespace at chunk boundaries may differ from the original source.
 
     Args:
         doc_id: The document UUID to retrieve.
@@ -388,7 +390,7 @@ async def get_document(doc_id: str) -> dict:
         if not records:
             return {"error": f"Document not found: {doc_id}", "status": "error"}
         first = records[0]
-        full_text = "\n\n".join(r.content for r in records)
+        full_text = join_chunks([r.content for r in records])
         return {
             "doc_id": doc_id,
             "source": first.source,

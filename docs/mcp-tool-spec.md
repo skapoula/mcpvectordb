@@ -225,7 +225,7 @@ Remove a document and all its chunks from the index.
 
 ### `get_document`
 
-Return the full Markdown text of an indexed document.
+Return the Markdown text of an indexed document, rebuilt from its chunks with the overlap between neighbouring chunks removed. Whitespace at chunk boundaries may differ from the source.
 
 **Input schema:**
 

@@ -224,3 +224,40 @@ def chunk(text: str) -> list[str]:
         len(filtered),
     )
     return filtered
+
+
+# Shortest shared text treated as chunk overlap rather than coincidence.
+_MIN_OVERLAP_CHARS = 16
+
+
+def join_chunks(chunks: list[str]) -> str:
+    """Reassemble a document from its ordered chunks, dropping repeated overlap.
+
+    Each chunk is appended without the longest prefix that the text so far
+    already ends with. Neighbours sharing less than _MIN_OVERLAP_CHARS are
+    joined with a blank line. Whitespace at a chunk boundary may differ from
+    the source when the splitter collapsed it.
+
+    ponytail: string matching cannot tell overlap from repetition, so highly
+    periodic text (the same phrase over and over) can come back shorter.
+    Store each chunk's source offsets if exact reconstruction matters.
+
+    Args:
+        chunks: Chunk texts in chunk_index order.
+
+    Returns:
+        The reassembled document text.
+    """
+    if not chunks:
+        return ""
+    parts = [chunks[0]]
+    for prev, nxt in zip(chunks, chunks[1:], strict=False):
+        probe = nxt[:_MIN_OVERLAP_CHARS]
+        pos = prev.find(probe) if len(probe) == _MIN_OVERLAP_CHARS else -1
+        while pos != -1 and not nxt.startswith(prev[pos:]):
+            pos = prev.find(probe, pos + 1)
+        if pos == -1:
+            parts.append("\n\n" + nxt)
+        else:
+            parts.append(nxt[len(prev) - pos :])
+    return "".join(parts)

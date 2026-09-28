@@ -638,6 +638,49 @@ class TestGetDocumentTool:
         assert result["chunk_count"] == 1
         assert result["metadata"] == {"author": "Test"}
 
+    @pytest.mark.integration
+    def test_get_document_does_not_repeat_chunk_overlap(self, _use_tmp_store):
+        """Text shared by neighbouring chunks appears once in the content."""
+        import uuid
+        from datetime import UTC, datetime
+
+        from mcpvectordb import server
+        from mcpvectordb.store import ChunkRecord
+
+        doc_id = str(uuid.uuid4())
+        texts = [
+            "First sentence here. The overlapping middle sentence.",
+            "The overlapping middle sentence. Last sentence here.",
+        ]
+        _use_tmp_store.upsert_chunks(
+            [
+                ChunkRecord(
+                    id=str(uuid.uuid4()),
+                    doc_id=doc_id,
+                    library="default",
+                    source="notes.md",
+                    content_hash="h",
+                    title="Notes",
+                    content=text,
+                    embedding=[0.1] * settings.embedding_dimension,
+                    chunk_index=i,
+                    created_at=datetime.now(UTC).isoformat(),
+                    metadata="{}",
+                    file_type="md",
+                    last_modified="",
+                    page=0,
+                )
+                for i, text in enumerate(texts)
+            ]
+        )
+
+        result = run(server.get_document(doc_id=doc_id))
+
+        assert result["content"] == (
+            "First sentence here. The overlapping middle sentence. Last sentence here."
+        )
+        assert result["chunk_count"] == 2
+
     @pytest.mark.unit
     def test_get_document_store_error_returns_error(self, monkeypatch):
         """StoreError from get_document returns a structured error dict."""
