@@ -146,9 +146,11 @@ def _split_recursive(
         if len(offsets) <= chunk_size:
             return [text]
         step = max(1, chunk_size - overlap)
+        # A window starting within the last `overlap` tokens lies wholly inside
+        # the previous window, so stop before emitting it.
         return [
             text[offsets[i][0] : offsets[min(i + chunk_size, len(offsets)) - 1][1]]
-            for i in range(0, len(offsets), step)
+            for i in range(0, len(offsets) - overlap, step)
         ]
 
     splits = text.split(sep)
@@ -178,6 +180,23 @@ def _split_recursive(
     return final_chunks
 
 
+def _merge_short(chunks: list[str]) -> list[str]:
+    """Fold chunks below chunk_min_tokens into a neighbour instead of dropping them."""
+    out: list[str] = []
+    for c in chunks:
+        if out:
+            merged = out[-1] + "\n\n" + c
+            short = min(_token_length(c), _token_length(out[-1]))
+            if (
+                short < settings.chunk_min_tokens
+                and _token_length(merged) <= settings.chunk_size_tokens
+            ):
+                out[-1] = merged
+                continue
+        out.append(c)
+    return out
+
+
 def chunk(text: str) -> list[str]:
     """Split *text* into token-bounded chunks suitable for embedding.
 
@@ -185,7 +204,8 @@ def chunk(text: str) -> list[str]:
         text: The Markdown text to split.
 
     Returns:
-        List of chunk strings, each between chunk_min_tokens and chunk_size_tokens.
+        List of chunk strings, each at most chunk_size_tokens. A chunk stays
+        below chunk_min_tokens only when no neighbour has room to absorb it.
     """
     if not text.strip():
         return []
@@ -196,19 +216,10 @@ def chunk(text: str) -> list[str]:
         settings.chunk_size_tokens,
         settings.chunk_overlap_tokens,
     )
-    filtered = [c for c in raw_chunks if _token_length(c) >= settings.chunk_min_tokens]
-
-    if not filtered and raw_chunks:
-        # Document is shorter than chunk_min_tokens — preserve raw_chunks rather
-        # than returning text.strip() which is not size-validated.
-        logger.debug(
-            "All chunks below min-token floor (%d); indexing document as-is",
-            settings.chunk_min_tokens,
-        )
-        filtered = raw_chunks
+    filtered = _merge_short(raw_chunks)
 
     logger.debug(
-        "Chunked text: %d raw → %d after min-token filter",
+        "Chunked text: %d raw → %d after merging short chunks",
         len(raw_chunks),
         len(filtered),
     )

@@ -66,6 +66,37 @@ class TestChunkBasic:
         for c in result:
             assert _token_length(c) >= settings.chunk_min_tokens
 
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Word " * 700 + "\n\nZebracorn closing remark.",
+            "Zebracorn opening remark.\n\n" + "Word " * 700,
+        ],
+    )
+    def test_short_paragraph_next_to_long_one_is_kept(self, text):
+        """A chunk below the floor is merged into a neighbour or kept, never dropped."""
+        from mcpvectordb.chunker import _token_length, chunk
+        from mcpvectordb.config import settings
+
+        result = chunk(text)
+        assert any("Zebracorn" in c and "remark." in c for c in result)
+        for c in result:
+            assert _token_length(c) <= settings.chunk_size_tokens
+
+    @pytest.mark.unit
+    def test_short_chunk_merges_into_neighbour_with_room(self):
+        """A short trailing paragraph joins the previous chunk when it fits."""
+        from mcpvectordb.chunker import _token_length, chunk
+        from mcpvectordb.config import settings
+
+        text = (
+            "Word " * 300 + "\n\n" + "Filler " * 400 + "\n\nZebracorn closing remark."
+        )
+        result = chunk(text)
+        assert result[-1].endswith("Zebracorn closing remark.")
+        assert all(_token_length(c) >= settings.chunk_min_tokens for c in result)
+
 
 class TestChunkEdgeCases:
     """Edge cases for the chunker."""
