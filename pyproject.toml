@@ -71,6 +71,7 @@ module = [
     "lancedb",
     "fastembed",
     "markitdown",
+    "onnxruntime.*",
     "pyarrow",
 ]
 ignore_missing_imports = true

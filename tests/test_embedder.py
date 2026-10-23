@@ -208,3 +208,71 @@ class TestEmbedderUnit:
         result = embedder_mod.get_embedder()
 
         assert isinstance(result, embedder_mod.Embedder)
+
+
+class TestLoadTextEmbedding:
+    """load_text_embedding recovers from a partial model download."""
+
+    @staticmethod
+    def _partial_cache(cache_root):
+        """Lay out a cache like an interrupted download: a blob left .incomplete."""
+        model_dir = cache_root / "models--org--model"
+        (model_dir / "blobs").mkdir(parents=True)
+        (model_dir / "blobs" / "abc.incomplete").write_bytes(b"partial")
+        return model_dir
+
+    @pytest.mark.unit
+    def test_deletes_partial_cache_and_downloads_again(self, monkeypatch, tmp_path):
+        """A missing model file empties the model's cache dir and retries once."""
+        from unittest.mock import MagicMock
+
+        import fastembed
+        from onnxruntime.capi.onnxruntime_pybind11_state import NoSuchFile
+
+        from mcpvectordb.embedder import load_text_embedding
+
+        model_dir = self._partial_cache(tmp_path)
+        model = MagicMock()
+        te_class = MagicMock(side_effect=[NoSuchFile("model.onnx missing"), model])
+        monkeypatch.setattr(fastembed, "TextEmbedding", te_class)
+        monkeypatch.setenv("FASTEMBED_CACHE_PATH", str(tmp_path))
+
+        assert load_text_embedding("org/model") is model
+        assert te_class.call_count == 2
+        assert not model_dir.exists()
+
+    @pytest.mark.unit
+    def test_missing_file_without_cache_dir_raises(self, monkeypatch, tmp_path):
+        """With no cache dir to clear, the original error propagates; no retry."""
+        from unittest.mock import MagicMock
+
+        import fastembed
+        from onnxruntime.capi.onnxruntime_pybind11_state import NoSuchFile
+
+        from mcpvectordb.embedder import load_text_embedding
+
+        te_class = MagicMock(side_effect=NoSuchFile("model.onnx missing"))
+        monkeypatch.setattr(fastembed, "TextEmbedding", te_class)
+        monkeypatch.setenv("FASTEMBED_CACHE_PATH", str(tmp_path))
+
+        with pytest.raises(NoSuchFile):
+            load_text_embedding("org/model")
+        assert te_class.call_count == 1
+
+    @pytest.mark.unit
+    def test_other_errors_keep_the_cache(self, monkeypatch, tmp_path):
+        """Only a missing model file clears the cache; other errors propagate."""
+        from unittest.mock import MagicMock
+
+        import fastembed
+
+        from mcpvectordb.embedder import load_text_embedding
+
+        model_dir = self._partial_cache(tmp_path)
+        te_class = MagicMock(side_effect=ValueError("unsupported model"))
+        monkeypatch.setattr(fastembed, "TextEmbedding", te_class)
+        monkeypatch.setenv("FASTEMBED_CACHE_PATH", str(tmp_path))
+
+        with pytest.raises(ValueError, match="unsupported model"):
+            load_text_embedding("org/model")
+        assert model_dir.exists()

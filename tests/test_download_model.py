@@ -22,3 +22,22 @@ def test_downloads_tokenizer_the_chunker_loads(monkeypatch, tmp_path):
     auto_tokenizer.from_pretrained.assert_called_once_with(
         "org/some-other-model", trust_remote_code=True
     )
+
+
+@pytest.mark.unit
+def test_repairs_partial_model_download(monkeypatch, tmp_path):
+    """A re-run after an interrupted download fetches the model again."""
+    from onnxruntime.capi.onnxruntime_pybind11_state import NoSuchFile
+
+    model_dir = tmp_path / "models--org--some-other-model"
+    model_dir.mkdir()
+    monkeypatch.setattr(settings, "embedding_model", "org/some-other-model")
+    monkeypatch.setenv("FASTEMBED_CACHE_PATH", str(tmp_path))
+    te_class = MagicMock(side_effect=[NoSuchFile("model.onnx missing"), MagicMock()])
+    monkeypatch.setattr("fastembed.TextEmbedding", te_class)
+    monkeypatch.setattr("transformers.AutoTokenizer", MagicMock())
+
+    _download_model.download_model()
+
+    assert te_class.call_count == 2
+    assert not model_dir.exists()
