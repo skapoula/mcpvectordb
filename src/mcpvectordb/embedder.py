@@ -2,13 +2,18 @@
 
 import logging
 import os
+import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
 
 from mcpvectordb.config import settings
 from mcpvectordb.exceptions import EmbeddingError
+
+if TYPE_CHECKING:
+    from fastembed import TextEmbedding
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +27,46 @@ _QUERY_PREFIX = "search_query: "
 _PREFIX_AWARE_MODELS = {"nomic-ai/nomic-embed-text-v1.5"}
 
 _instance: "Embedder | None" = None
+
+
+def load_text_embedding(model_name: str) -> "TextEmbedding":
+    """Load a fastembed model, re-downloading it once if its cache is partial.
+
+    fastembed 0.7.4 trusts an existing snapshot dir, so a download interrupted
+    before the ONNX file finished fails every later load with NoSuchFile.
+    Deleting that model's cache dir makes the next load download it afresh.
+
+    Args:
+        model_name: fastembed model ID (e.g. nomic-ai/nomic-embed-text-v1.5).
+
+    Returns:
+        The loaded fastembed TextEmbedding model.
+    """
+    from fastembed import TextEmbedding
+    from fastembed.common.utils import define_cache_dir
+    from onnxruntime.capi.onnxruntime_pybind11_state import NoSuchFile
+
+    try:
+        return TextEmbedding(model_name=model_name)
+    except NoSuchFile:
+        hf_repo = next(
+            (
+                m["sources"]["hf"]
+                for m in TextEmbedding.list_supported_models()
+                if m["model"] == model_name
+            ),
+            None,
+        )
+        repo = hf_repo or model_name
+        model_dir = define_cache_dir() / f"models--{repo.replace('/', '--')}"
+        if not model_dir.is_dir():
+            raise
+        logger.warning(
+            "Embedding model cache %s is incomplete; deleting it and downloading again",
+            model_dir,
+        )
+        shutil.rmtree(model_dir)
+        return TextEmbedding(model_name=model_name)
 
 
 class Embedder:
@@ -40,8 +85,6 @@ class Embedder:
             model_name: HuggingFace model ID (e.g. nomic-ai/nomic-embed-text-v1.5).
             batch_size: Number of texts encoded in one forward pass.
         """
-        from fastembed import TextEmbedding
-
         # Propagate settings.fastembed_cache_path to the env var fastembed reads,
         # unless FASTEMBED_CACHE_PATH is already set explicitly in the environment.
         if settings.fastembed_cache_path and not os.environ.get("FASTEMBED_CACHE_PATH"):
@@ -58,7 +101,7 @@ class Embedder:
             )
 
         logger.info("Loading embedding model %s", model_name)
-        self._model = TextEmbedding(model_name=model_name)
+        self._model = load_text_embedding(model_name)
         self._batch_size = batch_size
 
     def embed_documents(self, texts: list[str]) -> NDArray[np.float32]:

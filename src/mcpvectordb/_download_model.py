@@ -37,10 +37,10 @@ def download_model() -> None:
     model_name = settings.embedding_model
     print(f"Downloading '{model_name}' (this only happens once)…")
 
-    from fastembed import TextEmbedding
+    from mcpvectordb.embedder import load_text_embedding
 
-    # Instantiating triggers the download if the model is not already cached.
-    TextEmbedding(model_name=model_name)
+    # Loading triggers the download if the model is not already cached.
+    load_text_embedding(model_name)
     print("Embedding model ready.")
 
     # Pre-download the HuggingFace tokenizer used by the chunker for token counting.
